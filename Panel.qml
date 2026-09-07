@@ -15,14 +15,12 @@ Panel {
   ipcTarget: "zhipu"
   manageIpc: false
 
-  // Face layout: the bolt glyph's advance box carries far more side bearing
-  // than its ink, so "glyph + label" in one string renders a wide gap and a
-  // label centered away from the ink. Drawing the glyph as a sibling placed
-  // before the number keeps the ink tight. The width stops at the number's
-  // ink end (margin + label advance, no trailing button margin), so the
-  // slot — and the open-panel mark the bar centers on it — hugs the painted
-  // face symmetrically instead of trailing past it.
-  implicitWidth: button.x + button.scaledHorizontalMargin + button.labelWidth
+  // Painted ink width of the face (glyph ink start to number ink end); the
+  // slot pads it with the standard WidgetButton margin on both sides so
+  // neighbor spacing matches every other bar widget, and the open-panel mark
+  // below subtracts those margins again to hug the ink.
+  readonly property real faceInkWidth: button.x + button.labelWidth - Style.space(1)
+  implicitWidth: faceInkWidth + 2 * button.scaledHorizontalMargin
   implicitHeight: button.implicitHeight
 
   // ------------------------------------------------------------- appearance
@@ -83,9 +81,9 @@ Panel {
   readonly property string statePath: (Quickshell.env("XDG_STATE_HOME") || (Quickshell.env("HOME") + "/.local/state"))
     + "/omarchy/zhipu/usage.json"
 
-  // The open-panel mark under the bar defaults to 55% of the slot; the full
-  // painted face is a better length for it.
-  readonly property real openPanelIndicatorWidth: root.implicitWidth
+  // The open-panel mark under the bar defaults to 55% of the slot; the ink
+  // width keeps it exactly as wide as what is painted.
+  readonly property real openPanelIndicatorWidth: root.faceInkWidth
 
   // ------------------------------------------------------------------ label
   readonly property string barLabel: {
@@ -217,10 +215,9 @@ Panel {
     id: button
     anchors.verticalCenter: parent.verticalCenter
     width: implicitWidth
-    // The number's box starts with ~8.5 units of its own left margin; sliding
-    // the button under the glyph's advance box removes that padding from the
-    // gap so the two inks sit ~2 units apart.
-    x: glyphText.visible ? glyphText.implicitWidth - Style.space(8) : 0
+    // Standard left margin, the glyph's advance box, then the box's own
+    // margin slid under the glyph so the number's ink sits close to it.
+    x: button.scaledHorizontalMargin + glyphText.implicitWidth - Style.space(8)
     bar: root.bar
     // Only the number lives in the button's own text; the glyph is the
     // sibling to its left. The face-wide MouseArea below owns interaction,
@@ -237,7 +234,7 @@ Panel {
     id: glyphText
     visible: root.showBarLabel && root.barLabel !== ""
     anchors.verticalCenter: parent.verticalCenter
-    x: 0
+    x: button.scaledHorizontalMargin
     text: root.glyph
     color: root.statusColor
     font.family: root.fontFamily

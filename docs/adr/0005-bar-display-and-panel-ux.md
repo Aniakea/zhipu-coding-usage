@@ -102,3 +102,11 @@ whole face stays inside the clickable slot (a face-wide `MouseArea` owns
 interaction; the button keeps painting). `openPanelIndicatorWidth` reports
 the root's implicit width so the open-panel mark spans exactly the painted
 face instead of the 55%-of-slot default.
+
+Follow-up: the slot now pads the ink face with the standard WidgetButton
+side margins on both ends (neighbor spacing matches every other widget),
+while `openPanelIndicatorWidth` reports the ink width alone — spacing and
+mark length stay decoupled. Vertical: the face centers on the bar's text
+baseline (measured 22.5 px, identical to the center section's text widgets);
+right-section tray icons optically vary 23.0–24.5 px among themselves, which
+is stock bar behavior, not a widget offset.
