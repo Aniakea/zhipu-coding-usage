@@ -12,6 +12,15 @@ behind it — the 5-hour window and the weekly quota, for accounts on
   **and** the absolute wall-clock time the window rolls over.
 - **Weekly quota** — same, for the week. Old plans without a weekly quota get
   a "not reported on this plan" note instead of a fake zero.
+- **Token charts** — a 24 h hourly line (peak-hour points marked) plus
+  day / week / month consumption lines accumulated in a local SQLite
+  history (`~/.local/state/omarchy/zhipu/history.db`, 400-day retention).
+- **Pace projection** — where the weekly budget lands at the current burn
+  rate ("on this pace: exhausts Wed 14:00"), with an off-peak share tile
+  and a peak/off-peak coefficient badge (Mon–Fri 14:00–18:00 local = 3×).
+- **Predictive alert** — a desktop notification a few hours before the
+  weekly quota is projected to cross 90 %, in addition to the threshold
+  notifications.
 - **Last 24 hours** — requests and tokens totals, per-model token ranking,
   and web search / web read tool counts.
 - **Threshold notifications** — a desktop notification the first time the
@@ -110,6 +119,7 @@ Set with `omarchy bar set`, or the widget's entry in
 | --- | --- | --- |
 | `refreshIntervalSec` | `120` | Collector cadence |
 | `barDisplay` | `"percent"` | Bar label: `percent` (5 h), `weekly`, `both`, or `icon` |
+| `language` | `"auto"` | Panel/notification language: `auto`, `en`, `zh` |
 | `glyph` | ⚡ | Override the bar glyph if your font lacks the default |
 
 ```sh
@@ -165,6 +175,9 @@ Neither touches OpenCode's own data. The records this plugin writes live in
 ```sh
 rm -rf ~/.local/state/omarchy/zhipu
 ```
+
+That directory also holds `history.db` (the consumption history behind the
+day/week/month charts).
 
 ## Development
 

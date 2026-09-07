@@ -49,6 +49,34 @@ Panel {
   readonly property var weekly: record && record.weekly ? record.weekly : null
   readonly property var usage24h: record && record.usage24h ? record.usage24h : null
   readonly property var models: usage24h && usage24h.models ? usage24h.models : []
+  property string chartRange: "24h"
+
+  function seriesForRange(range) {
+    if (range === "24h") return chartBuckets
+    var history = record && record.history ? record.history : {}
+    var series = history[range]
+    if (!series || series.length === 0) return []
+    var out = []
+    for (var i = 0; i < series.length; i++)
+      out.push({ label: String(series[i].key), tokens: series[i].tokens })
+    return out
+  }
+
+  readonly property var chartBuckets: {
+    if (chartRange !== "24h") return seriesForRange(chartRange)
+    if (!usage24h || !usage24h.tokensByHour) return []
+    var out = []
+    for (var i = 0; i < usage24h.tokensByHour.length; i++) {
+      var label = usage24h.hourLabels && usage24h.hourLabels[i] ? String(usage24h.hourLabels[i]) : ""
+      out.push({
+        tokens: usage24h.tokensByHour[i],
+        peak: usage24h.peakByHour ? usage24h.peakByHour[i] === true : false,
+        label: label,
+        hour: label.length >= 13 ? label.substring(11, 13) : ""
+      })
+    }
+    return out
+  }
   readonly property string planLabel: record && record.planLabel ? String(record.planLabel) : ""
   readonly property string region: record && record.region ? String(record.region) : ""
 
@@ -72,6 +100,12 @@ Panel {
   readonly property int refreshIntervalSec: Math.max(30, parseInt(setting("refreshIntervalSec", 120), 10) || 120)
   readonly property string barDisplay: String(setting("barDisplay", "percent"))
   readonly property bool showBarLabel: barDisplay !== "icon"
+  readonly property string language: String(setting("language", "auto"))
+  readonly property string langEffective: {
+    if (language === "en" || language === "zh") return language
+    return String(Qt.locale().name).indexOf("zh") === 0 ? "zh" : "en"
+  }
+  readonly property var t: M.strings(langEffective)
   readonly property string glyph: {
     var configured = String(setting("glyph", ""))
     return configured === "" ? "\uf0e7" : configured
@@ -317,7 +351,9 @@ Panel {
               var parts = []
               if (root.planLabel !== "") parts.push(root.planLabel)
               parts.push(root.region === "intl" ? "z.ai" : "bigmodel.cn")
-              parts.push(root.record && root.record.error ? "stale" : "live")
+              parts.push(root.record && root.record.error ? root.t.stale : root.t.live)
+              if (root.record && root.record.peak)
+                parts.push(root.record.peak.peakNow ? root.t.peak : root.t.offPeak)
               return parts.join("  ·  ")
             }
             detail: root.activeError !== "" ? root.activeError
@@ -352,14 +388,24 @@ Panel {
 
           QuotaMeter {
             width: parent.width
-            label: "5-hour window"
+            label: root.t.fiveHour
             window: root.fiveHour
           }
 
           QuotaMeter {
             width: parent.width
-            label: "Weekly quota"
+            label: root.t.weekly
             window: root.weekly
+          }
+
+          Text {
+            width: parent.width
+            visible: root.record && root.record.projection
+            text: M.paceLine(root.record ? root.record.projection : null, root.langEffective)
+            color: root.faint
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            elide: Text.ElideRight
           }
 
           // An absent window is a state of the plan, not a zero: naming it
@@ -367,7 +413,7 @@ Panel {
           Text {
             width: parent.width
             visible: root.weekly && !root.weekly.present
-            text: "Not reported on this plan: weekly quota"
+            text: root.t.notReported
             color: root.faint
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -385,10 +431,22 @@ Panel {
 
             Repeater {
               model: [
-                { label: "requests · 24h", value: M.group(root.usage24h ? root.usage24h.calls : 0), strong: true },
-                { label: "tokens · 24h", value: M.tokens(root.usage24h ? root.usage24h.tokens : 0), strong: false },
-                { label: "web search · 24h", value: M.group(root.usage24h && root.usage24h.tools ? root.usage24h.tools.search : 0), strong: false },
-                { label: "web read · 24h", value: M.group(root.usage24h && root.usage24h.tools ? root.usage24h.tools.web_read : 0), strong: false }
+                { label: root.t.requests24h, value: M.group(root.usage24h ? root.usage24h.calls : 0), strong: true },
+                { label: root.t.tokens24h, value: M.tokens(root.usage24h ? root.usage24h.tokens : 0), strong: false },
+                { label: root.t.webSearch24h, value: M.group(root.usage24h && root.usage24h.tools ? root.usage24h.tools.search : 0), strong: false },
+                { label: root.t.webRead24h, value: M.group(root.usage24h && root.usage24h.tools ? root.usage24h.tools.web_read : 0), strong: false },
+                {
+                  label: root.t.offPeakShare,
+                  value: root.record && root.record.peak && root.record.peak.offPeakShare24h !== null && root.record.peak.offPeakShare24h !== undefined
+                    ? Math.round(root.record.peak.offPeakShare24h * 100) + "%" : "—",
+                  strong: false
+                },
+                {
+                  label: root.t.pace,
+                  value: root.record && root.record.projection
+                    ? M.untilTextMs(root.record.projection.exhaustsAtMs, root.nowMs) : "—",
+                  strong: false
+                }
               ]
 
               Column {
@@ -417,9 +475,88 @@ Panel {
             }
           }
 
+          Item {
+            width: parent.width
+            implicitHeight: headerRow.implicitHeight
+            visible: root.chartBuckets.length > 0
+
+            Text {
+              id: chartTitle
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.t.tokensChart
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              font.bold: true
+            }
+
+            Row {
+              id: headerRow
+              anchors.right: parent.right
+              spacing: Style.space(4)
+
+              Repeater {
+                model: [
+                  { key: "24h", label: root.t.range24h },
+                  { key: "daily", label: root.t.rangeDaily },
+                  { key: "weekly", label: root.t.rangeWeekly },
+                  { key: "monthly", label: root.t.rangeMonthly }
+                ]
+
+                Rectangle {
+                  required property var modelData
+                  readonly property bool active: root.chartRange === modelData.key
+                  readonly property bool offered: root.seriesForRange(modelData.key).length > 0
+                  width: chipLabel.implicitWidth + Style.space(6)
+                  height: chipLabel.implicitHeight + Style.space(3)
+                  radius: height / 2
+                  color: active ? root.alpha(root.accent, 0.35) : "transparent"
+                  border.width: offered ? 1 : 0
+                  border.color: root.alpha(root.foreground, 0.25)
+                  opacity: offered ? 1 : 0.35
+
+                  Text {
+                    id: chipLabel
+                    anchors.centerIn: parent
+                    text: parent.modelData.label
+                    color: parent.active ? root.foreground : root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: parent.offered ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    onClicked: if (parent.offered) root.chartRange = parent.modelData.key
+                  }
+                }
+              }
+            }
+          }
+
+          LineChart {
+            id: tokenChart
+            width: parent.width
+            height: Style.space(72)
+            visible: root.chartBuckets.length > 0
+            points: root.chartBuckets
+            lineColor: root.alpha(root.accent, 0.9)
+            fillColor: root.alpha(root.accent, 0.14)
+            peakColor: Qt.tint(root.foreground, root.alpha(root.urgent, 0.55))
+            fontFamily: root.fontFamily
+            textColor: root.faint
+            tooltipHost: root
+            pointText: function(p) {
+              return p.label + " · " + M.tokens(p.tokens)
+                + (p.peak !== undefined ? " · " + (p.peak ? root.t.peakBar : root.t.offPeakBar) : "")
+            }
+          }
+
           PanelSectionHeader {
             width: parent.width
-            text: "Models · last 24h"
+            text: root.t.modelsTitle
             foreground: root.foreground
             fontFamily: root.fontFamily
             visible: root.models.length > 0
@@ -504,7 +641,7 @@ Panel {
           Text {
             width: parent.width
             visible: root.models.length === 0 && root.activeError === ""
-            text: "No model usage in the last 24 hours.\nRun a GLM model and this fills in."
+            text: root.t.noUsage
             color: root.faint
             font.family: root.fontFamily
             font.pixelSize: Style.font.bodySmall
@@ -523,9 +660,9 @@ Panel {
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
               width: parent.width - hintText.implicitWidth - Style.space(10)
-              text: root.loading ? "refreshing…"
+              text: root.loading ? root.t.refreshing
                 : root.record && root.record.generatedAt
-                  ? "updated " + M.agoText(root.record.generatedAt, root.nowMs) : ""
+                  ? root.t.updated + M.agoText(root.record.generatedAt, root.nowMs) : ""
               color: root.faint
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -536,7 +673,7 @@ Panel {
               id: hintText
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
-              text: "r refresh · b usage"
+              text: root.t.refreshHint
               color: root.faint
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -548,6 +685,123 @@ Panel {
   }
 
   // ----------------------------------------------------------------- meters
+
+  // A polyline chart over `points` ({label, tokens, peak?}) with a soft
+  // area fill, sparse x labels, and per-point hover through the bar's own
+  // tooltip channel. Peak-flagged points draw a marker in `peakColor`.
+  component LineChart: Item {
+    id: chart
+    property var points: []
+    property color lineColor
+    property color fillColor
+    property color peakColor
+    property color textColor
+    property string fontFamily
+    property var tooltipHost: null
+    property var pointText: function(p) { return "" }
+
+    readonly property real labelStrip: Style.space(12)
+    readonly property real chartTop: Style.space(4)
+    readonly property real chartBottom: height - labelStrip
+    readonly property real peakValue: {
+      var best = 0
+      for (var i = 0; i < points.length; i++) best = Math.max(best, M.num(points[i].tokens))
+      return best
+    }
+
+    onPointsChanged: canvas.requestPaint()
+    onWidthChanged: canvas.requestPaint()
+    onHeightChanged: canvas.requestPaint()
+
+    function xAt(i) { return points.length > 1 ? width * i / (points.length - 1) : width / 2 }
+    function yAt(i) {
+      var share = M.shareOfPeak(M.num(points[i].tokens), peakValue)
+      return chartBottom - (chartBottom - chartTop) * share
+    }
+
+    Canvas {
+      id: canvas
+      anchors.fill: parent
+
+      onPaint: {
+        var ctx = getContext("2d")
+        ctx.reset()
+        if (chart.points.length < 2) {
+          if (chart.points.length === 1) {
+            ctx.fillStyle = chart.lineColor
+            ctx.beginPath()
+            ctx.arc(chart.xAt(0), chart.yAt(0), Math.max(1.5, Style.space(1)), 0, Math.PI * 2)
+            ctx.fill()
+          }
+          return
+        }
+        var path = []
+        for (var i = 0; i < chart.points.length; i++)
+          path.push({ x: chart.xAt(i), y: chart.yAt(i) })
+
+        ctx.beginPath()
+        ctx.moveTo(path[0].x, chart.chartBottom)
+        for (var j = 0; j < path.length; j++) ctx.lineTo(path[j].x, path[j].y)
+        ctx.lineTo(path[path.length - 1].x, chart.chartBottom)
+        ctx.closePath()
+        ctx.fillStyle = chart.fillColor
+        ctx.fill()
+
+        ctx.beginPath()
+        ctx.moveTo(path[0].x, path[0].y)
+        for (var k = 1; k < path.length; k++) ctx.lineTo(path[k].x, path[k].y)
+        ctx.strokeStyle = chart.lineColor
+        ctx.lineWidth = Math.max(1, Style.space(0.6))
+        ctx.lineJoin = "round"
+        ctx.stroke()
+
+        for (var m = 0; m < chart.points.length; m++) {
+          if (chart.points[m].peak !== true) continue
+          ctx.beginPath()
+          ctx.arc(path[m].x, path[m].y, Math.max(1.5, Style.space(0.8)), 0, Math.PI * 2)
+          ctx.fillStyle = chart.peakColor
+          ctx.fill()
+        }
+      }
+    }
+
+    Repeater {
+      model: chart.points.length
+
+      Item {
+        id: pointZone
+        required property int index
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        x: chart.width * index / Math.max(1, chart.points.length - 1) - chart.width / Math.max(2, chart.points.length * 2)
+        width: chart.width / Math.max(2, chart.points.length)
+
+        Text {
+          anchors.bottom: parent.bottom
+          anchors.horizontalCenter: parent.horizontalCenter
+          visible: pointZone.index === 0
+                    || pointZone.index === chart.points.length - 1
+                    || (chart.points.length > 8 && pointZone.index % Math.ceil(chart.points.length / 5) === 0)
+          text: {
+            var label = String(chart.points[pointZone.index].label)
+            return label.length >= 13 ? label.substring(11, 16) : label.substring(5)
+          }
+          color: chart.textColor
+          font.family: chart.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+
+        MouseArea {
+          anchors.fill: parent
+          hoverEnabled: true
+          onEntered: if (chart.tooltipHost && chart.tooltipHost.bar)
+            chart.tooltipHost.bar.showTooltip(pointZone, chart.pointText(chart.points[pointZone.index]))
+          onExited: if (chart.tooltipHost && chart.tooltipHost.bar)
+            chart.tooltipHost.bar.hideTooltip(pointZone)
+        }
+      }
+    }
+  }
 
   component QuotaMeter: Column {
     property string label: ""
@@ -622,12 +876,8 @@ Panel {
         id: resetText
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        text: {
-          if (!window || !window.resetsAtMs) return ""
-          var countdown = "resets in " + M.untilTextMs(window.resetsAtMs, root.nowMs)
-          var absolute = M.clockTextMs(window.resetsAtMs)
-          return absolute !== "" ? countdown + " · " + absolute : countdown
-        }
+        text: window && window.resetsAtMs
+          ? M.resetLine(window.resetsAtMs, root.nowMs, root.langEffective) : ""
         color: root.faint
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption

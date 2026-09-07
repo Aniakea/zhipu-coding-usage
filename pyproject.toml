@@ -4,3 +4,10 @@ testpaths = ["tests"]
 
 [tool.basedpyright]
 extraPaths = ["bin"]
+
+# Peak-hour classification and chart buckets are local wall time by design
+# (ADR-0008); naive datetimes there are intentional.
+[tool.ruff.lint.per-file-ignores]
+"bin/zhipu_insights.py" = ["DTZ001", "DTZ007"]
+"bin/zhipu_history.py" = ["DTZ005"]
+"tests/test_collector.py" = ["DTZ001"]

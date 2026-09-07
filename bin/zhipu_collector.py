@@ -14,6 +14,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, Final
 
 from zhipu_fetch import FetchError
+from zhipu_insights import PeakInfo, Projection, bucket_is_peak
 
 LEVEL_LABELS: Final[dict[str, str]] = {
     "lite": "Lite",
@@ -63,6 +64,9 @@ class Usage24h:
     tokens: float
     models: tuple[ModelRow, ...]
     tools: Tools24h
+    hourLabels: tuple[str, ...] = ()
+    tokensByHour: tuple[float, ...] = ()
+    peakByHour: tuple[bool, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,11 +83,17 @@ class Record:
     fiveHour: Window
     weekly: Window
     usage24h: Usage24h
+    peak: PeakInfo
+    projection: Projection | None
+    history: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         out = asdict(self)
         out["fiveHour"]["resetsAt"] = self.fiveHour.resets_at_iso()
         out["weekly"]["resetsAt"] = self.weekly.resets_at_iso()
+        if self.projection is not None:
+            stamp = dt.datetime.fromtimestamp(self.projection.exhaustsAtMs / 1000, dt.timezone.utc)
+            out["projection"]["exhaustsAt"] = stamp.isoformat().replace("+00:00", "Z")
         return out
 
 
@@ -193,11 +203,11 @@ def parse_quota(payload: Any) -> tuple[str, Window, Window]:
     return level, five_hour, weekly
 
 
-def parse_model_usage(payload: Any) -> tuple[int, float, tuple[ModelRow, ...]]:
+def parse_model_usage(payload: Any) -> Usage24h:
     data = payload.get("data", payload) if isinstance(payload, dict) else {}
     total = data.get("totalUsage") if isinstance(data, dict) else None
     if not isinstance(total, dict):
-        return 0, 0.0, ()
+        return blank_usage()
     calls = int(_number(total.get("totalModelCallCount")) or 0)
     tokens = _number(total.get("totalTokensUsage")) or 0.0
     models: list[ModelRow] = []
@@ -209,7 +219,22 @@ def parse_model_usage(payload: Any) -> tuple[int, float, tuple[ModelRow, ...]]:
         if name and row_tokens > 0:
             models.append(ModelRow(name, row_tokens))
     models.sort(key=lambda m: m.tokens, reverse=True)
-    return calls, tokens, tuple(models[:10])
+
+    hour_labels = tuple(str(label) for label in data.get("x_time") or [])
+    tokens_by_hour = tuple(_number(value) or 0.0 for value in data.get("tokensUsage") or [])
+    count = min(len(hour_labels), len(tokens_by_hour), 25)
+    hour_labels, tokens_by_hour = hour_labels[-count:], tokens_by_hour[-count:]
+    peak_by_hour = tuple(bucket_is_peak(label) for label in hour_labels)
+
+    return Usage24h(
+        calls=calls,
+        tokens=tokens,
+        models=tuple(models[:10]),
+        tools=Tools24h(0, 0, 0),
+        hourLabels=hour_labels,
+        tokensByHour=tokens_by_hour,
+        peakByHour=peak_by_hour,
+    )
 
 
 def parse_tool_usage(payload: Any) -> Tools24h:
@@ -238,6 +263,9 @@ def build_record(
     weekly: Window,
     usage: Usage24h,
     fetched_at: str,
+    peak: PeakInfo | None = None,
+    projection: Projection | None = None,
+    history: dict[str, Any] | None = None,
 ) -> Record:
     label = LEVEL_LABELS.get(level, level[:1].upper() + level[1:] if level else "")
     return Record(
@@ -253,6 +281,9 @@ def build_record(
         fiveHour=five_hour,
         weekly=weekly,
         usage24h=usage,
+        peak=peak if peak is not None else PeakInfo(False, None),
+        projection=projection,
+        history=history,
     )
 
 

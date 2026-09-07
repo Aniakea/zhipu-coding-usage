@@ -41,3 +41,13 @@ decides usage.
 - **Key lookup order** — env `ZHIPUAI_API_KEY` → `ZAI_API_KEY` → `GLM_API_KEY` → config file. Nothing else at runtime; `--set-key` / `--import-key` are the one-time setup commands (ADR 0004, second amendment).
 - **Live / stale** — panel indicator: "live" = fresh successful fetch; "stale" = rendering last good record after a failure, with age shown.
 - **tool-usage** — windowed like model-usage (24 h); totals under `totalUsage`: `totalNetworkSearchCount` / `totalWebReadMcpCount` / `totalZreadMcpCount`, with per-tool detail in `toolDetails[].{modelName,totalUsageCount}`.
+
+## v0.3 additions
+
+- **Peak window** — Mon–Fri 14:00–18:00 local time; flagship models bill at a 3× coefficient there, 1× elsewhere (ADR 0008).
+- **Off-peak share** — fraction of the 24 h token consumption outside the peak window.
+- **Pace projection** — linear extrapolation of weekly burn: projected exhaustion instant, hours remaining, hours to 90 % (ADR 0008).
+- **Predictive notification** — once-per-cycle alert when the projection puts the 90 % mark ≤ 6 h away.
+- **History DB** — `~/.local/state/omarchy/zhipu/history.db`, one `hourly` row per local wall-clock hour, upserted with MAX(); feeds the day/week/month charts (ADR 0009).
+- **LineChart** — shared Canvas polyline component behind all four chart ranges (24h/day/week/month).
+- **language setting** — `auto`/`en`/`zh` widget setting; notifications follow a config `language` value with the same semantics.

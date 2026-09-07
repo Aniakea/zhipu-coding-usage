@@ -26,26 +26,17 @@ import datetime as dt
 import getpass
 import json
 import os
-import subprocess
 import sys
-import tempfile
+from dataclasses import replace
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import zhipu_collector as zc  # noqa: E402
 import zhipu_fetch as zf  # noqa: E402
-
-NOTIFY_RULES: Final[dict[str, tuple[int, ...]]] = {
-    "fiveHour": (90,),
-    "weekly": (75, 90, 100),
-}
-NOTIFY_WINDOW_LABELS: Final[dict[str, str]] = {
-    "fiveHour": "5-hour window",
-    "weekly": "weekly quota",
-}
-NOTIFY_STATE_MAX_AGE_DAYS: Final = 60
-
+import zhipu_history as zh  # noqa: E402
+import zhipu_insights as zi  # noqa: E402
+import zhipu_notify as zn  # noqa: E402
 
 def state_paths() -> tuple[Path, Path, Path]:
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
@@ -53,25 +44,6 @@ def state_paths() -> tuple[Path, Path, Path]:
     return directory / "usage.json", directory / "notify-state.json", Path(
         os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
     ) / "omarchy" / "zhipu-coding-usage.json"
-
-
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    """Atomic write so the panel never observes a half-written record."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp: Path | None = None
-    try:
-        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp-", suffix=".json")
-        tmp = Path(tmp_name)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, separators=(",", ":"))
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
-        tmp = None
-    finally:
-        if tmp is not None:
-            tmp.unlink(missing_ok=True)
 
 
 def load_previous(usage_path: Path) -> dict[str, Any] | None:
@@ -100,90 +72,23 @@ def collect_record(config: dict[str, Any], env: dict[str, str]) -> dict[str, Any
     try:
         models_payload = zf.fetch_json(base, zf.MODEL_USAGE_PATH, credentials, config, zf.usage_window_params())
         tools_payload = zf.fetch_json(base, zf.TOOL_USAGE_PATH, credentials, config, zf.usage_window_params())
-        calls, tokens, models = zc.parse_model_usage(models_payload)
-        usage = zc.Usage24h(calls, tokens, models, zc.parse_tool_usage(tools_payload))
+        usage = zc.parse_model_usage(models_payload)
+        usage = replace(usage, tools=zc.parse_tool_usage(tools_payload))
     except zf.FetchError:
         pass  # Secondary endpoints: the quota windows stay authoritative.
 
-    record = zc.build_record(credentials.region, level, five_hour, weekly, usage, zc.utcnow_iso())
+    now_ms = int(dt.datetime.now().timestamp() * 1000)
+    peak = zi.peak_info(dt.datetime.now(), usage.hourLabels, usage.tokensByHour)
+    projection = zi.weekly_projection(
+        now_ms,
+        float(weekly.used or 0.0),
+        float(weekly.budget or 0.0),
+        int(weekly.resetsAtMs or 0),
+    ) if weekly.present and weekly.used and weekly.budget and weekly.resetsAtMs else None
+    history = zh.collect_history(usage_path.parent / "history.db", usage)
+
+    record = zc.build_record(credentials.region, level, five_hour, weekly, usage, zc.utcnow_iso(), peak, projection, history)
     return record.to_dict()
-
-
-# -------------------------------------------------------------- notification
-
-
-def _notify_body(window_name: str, threshold: int, window: dict[str, Any]) -> str:
-    label = NOTIFY_WINDOW_LABELS[window_name]
-    used = window.get("used")
-    budget = window.get("budget")
-    counts = ""
-    if isinstance(used, (int, float)) and isinstance(budget, (int, float)) and budget > 0:
-        counts = f" — {used:,.0f} of {budget:,.0f} used"
-    if threshold >= 100:
-        return f"{label} is exhausted.{counts}"
-    return f"{label} has reached {threshold}%.{counts}"
-
-
-def _fire_notification(summary: str, body: str, critical: bool) -> bool:
-    try:
-        result = subprocess.run(
-            [
-                "notify-send",
-                "--app-name=Zhipu Coding Usage",
-                f"--urgency={'critical' if critical else 'normal'}",
-                "--icon=dialog-information",
-                summary,
-                body,
-            ],
-            check=False,
-            timeout=5,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0
-
-
-def maybe_notify(record: dict[str, Any], enabled: bool) -> None:
-    if not enabled or record.get("error") != "":
-        return
-    _, notify_path, _ = state_paths()
-    try:
-        with notify_path.open("r", encoding="utf-8") as fh:
-            state = json.load(fh)
-        fired = state.get("fired", {}) if isinstance(state, dict) else {}
-    except (OSError, ValueError):
-        fired = {}
-
-    now = dt.datetime.now(dt.timezone.utc)
-    fresh: dict[str, str] = {}
-    for window_name, thresholds in NOTIFY_RULES.items():
-        window = record.get(window_name)
-        if not isinstance(window, dict) or window.get("present") is not True:
-            continue
-        percent = window.get("percent")
-        if not isinstance(percent, (int, float)):
-            continue
-        crossed = max((t for t in thresholds if percent >= t), default=None)
-        if crossed is None:
-            continue
-        identity = f"{window_name}@{window.get('resetsAtMs') or 'static'}"
-        if identity in fired:
-            continue
-        summary = f"Zhipu {NOTIFY_WINDOW_LABELS[window_name]} at {percent:.0f}%"
-        if _fire_notification(summary, _notify_body(window_name, crossed, window), crossed >= 100):
-            fresh[identity] = now.isoformat()
-
-    if not fresh:
-        return
-    fired.update(fresh)
-    cutoff = (now - dt.timedelta(days=NOTIFY_STATE_MAX_AGE_DAYS)).isoformat()
-    pruned = {key: at for key, at in fired.items() if at >= cutoff}
-    try:
-        write_json(notify_path, {"fired": pruned})
-    except OSError:
-        return  # A repeated notification beats a failed run.
 
 
 # ----------------------------------------------------------------- key setup
@@ -197,7 +102,7 @@ def save_config_key(config_path: Path, key: str, region: str) -> None:
     config = zf.read_config(config_path)
     config["apiKey"] = key
     config["region"] = region
-    write_json(config_path, config)
+    zn.write_json(config_path, config)
 
 
 def run_key_setup(args: argparse.Namespace, config_path: Path) -> int:
@@ -238,7 +143,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--region", choices=("cn", "intl"), help="pin the region written by --set-key/--import-key")
     args = parser.parse_args(argv)
 
-    usage_path, _, config_path = state_paths()
+    usage_path, notify_path, config_path = state_paths()
 
     if args.set_key is not None or args.import_key:
         return run_key_setup(args, config_path)
@@ -246,10 +151,12 @@ def main(argv: list[str]) -> int:
     config = zf.read_config(config_path)
     record = collect_record(config, dict(os.environ))
 
-    write_json(usage_path, record)
-    maybe_notify(
+    zn.write_json(usage_path, record)
+    zn.maybe_notify(
         record,
         enabled=not args.no_notify and config.get("notify", True) is not False,
+        lang=zn.notify_lang(config),
+        notify_state_path=notify_path,
     )
 
     if args.to_stdout:

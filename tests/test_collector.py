@@ -31,7 +31,9 @@ def load_module(name: str, path: Path) -> ModuleType:
 
 sys.path.insert(0, str(REPO / "bin"))
 zf = load_module("zhipu_fetch", REPO / "bin" / "zhipu_fetch.py")
+zi = load_module("zhipu_insights", REPO / "bin" / "zhipu_insights.py")
 zc = load_module("zhipu_collector", REPO / "bin" / "zhipu_collector.py")
+zn = load_module("zhipu_notify", REPO / "bin" / "zhipu_notify.py")
 entry = load_module("zhipu_entry", REPO / "bin" / "zhipu-coding-usage")
 
 
@@ -148,9 +150,16 @@ def Test_resetMsNormalization_when_stampIsSeconds() -> None:
 
 
 def Test_modelRows_when_modelUsageHasTotalUsage() -> None:
-    calls, tokens, models = zc.parse_model_usage(MODEL_USAGE)
-    assert calls == 329 and tokens == 48654815.0
-    assert [(m.name, m.tokens) for m in models] == [("GLM-5.3", 48652449.0), ("GLM-5.3-Flash", 2366.0)]
+    usage = zc.parse_model_usage(MODEL_USAGE)
+    assert usage.calls == 329 and usage.tokens == 48654815.0
+    assert [(m.name, m.tokens) for m in usage.models] == [("GLM-5.3", 48652449.0), ("GLM-5.3-Flash", 2366.0)]
+
+
+def Test_hourlySeries_when_modelUsageCarriesBuckets() -> None:
+    usage = zc.parse_model_usage(MODEL_USAGE)
+    assert usage.hourLabels == ("2026-09-07 19:00", "2026-09-07 20:00")
+    assert usage.tokensByHour == (21616864.0, 19550094.0)
+    assert usage.peakByHour == (False, False)  # 19:00 and 20:00 sit outside 14:00-18:00
 
 
 def Test_tools24h_when_toolUsageHasTotals() -> None:
@@ -159,7 +168,7 @@ def Test_tools24h_when_toolUsageHasTotals() -> None:
 
 
 def Test_emptyUsage_when_modelUsagePayloadMalformed() -> None:
-    assert zc.parse_model_usage({"data": {"totalUsage": None}}) == (0, 0.0, ())
+    assert zc.parse_model_usage({"data": {"totalUsage": None}}) == zc.blank_usage()
     assert zc.parse_tool_usage({}) == zc.Tools24h(0, 0, 0)
 
 
@@ -240,29 +249,29 @@ def Test_notifyFiresHighestNewThreshold_when_crossed(tmp_path: Path, monkeypatch
         fired_calls.append(summary)
         return True
 
-    monkeypatch.setattr(entry, "_fire_notification", fake_fire)
-    monkeypatch.setattr(entry, "state_paths", lambda: (tmp_path / "usage.json", tmp_path / "notify-state.json", tmp_path / "config.json"))
+    monkeypatch.setattr(zn, "_fire_notification", fake_fire)
+    notify_state = tmp_path / "notify-state.json"
 
     _, five_hour, weekly = zc.parse_quota(QUOTA_MAX_V2)
     record = zc.build_record("cn", "max", five_hour, weekly, zc.blank_usage(), "").to_dict()
-    entry.maybe_notify(record, enabled=True)
+    zn.maybe_notify(record, enabled=True, lang="en", notify_state_path=notify_state)
 
     assert fired_calls == []  # 63% crosses nothing on any window
     record["weekly"]["percent"] = 91.0
-    entry.maybe_notify(record, enabled=True)
+    zn.maybe_notify(record, enabled=True, lang="en", notify_state_path=notify_state)
     assert len(fired_calls) == 1 and "weekly quota at 91%" in fired_calls[0]
 
     state = json.loads((tmp_path / "notify-state.json").read_text())
     assert any(key.startswith("weekly@") for key in state["fired"])
 
-    entry.maybe_notify(record, enabled=True)  # same cycle identity: deduped
+    zn.maybe_notify(record, enabled=True, lang="en", notify_state_path=notify_state)  # same cycle identity: deduped
     assert len(fired_calls) == 1
 
 
 def Test_notifyBody_when_budgetKnown() -> None:
-    body = entry._notify_body("weekly", 90, {"used": 54000, "budget": 60000})
+    body = zn._notify_body("weekly", 90, {"used": 54000, "budget": 60000}, "en")
     assert "90%" in body and "54,000 of 60,000" in body
-    assert "exhausted" in entry._notify_body("weekly", 100, {"used": 1, "budget": 2})
+    assert "exhausted" in zn._notify_body("weekly", 100, {"used": 1, "budget": 2}, "en")
 
 
 # ------------------------------------------------------------------ key setup
@@ -298,3 +307,110 @@ def Test_importKeyFailsSoftly_when_noAuthStore(tmp_path: Path, monkeypatch: pyte
     monkeypatch.setattr(entry, "state_paths", lambda: (tmp_path / "usage.json", tmp_path / "notify.json", tmp_path / "config.json"))
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     assert entry.main(["--import-key"]) == 2
+
+
+# ------------------------------------------------------------------- insights
+
+
+def Test_peakClassification_when_weekdayAndWeekendVary() -> None:
+    import datetime as dt
+
+    assert zi.is_peak(dt.datetime(2026, 9, 8, 15, 0)) is True  # Tuesday 15:00
+    assert zi.is_peak(dt.datetime(2026, 9, 8, 13, 59)) is False
+    assert zi.is_peak(dt.datetime(2026, 9, 8, 18, 0)) is False  # exclusive end
+    assert zi.is_peak(dt.datetime(2026, 9, 12, 15, 0)) is False  # Saturday
+
+
+def Test_offPeakShare_when_bucketsSpanWindows() -> None:
+    import datetime as dt
+
+    labels = ("2026-09-08 15:00", "2026-09-08 20:00", "2026-09-09 02:00")
+    tokens = (3000.0, 5000.0, 2000.0)
+    info = zi.peak_info(dt.datetime(2026, 9, 9, 9, 0), tuple(labels), tuple(tokens))
+    assert info.peakNow is False
+    assert info.offPeakShare24h == 0.7  # 7000 of 10000 outside the peak window
+
+
+def Test_weeklyProjection_when_paceOutlastsReset() -> None:
+    _, _, weekly = zc.parse_quota(QUOTA_PRO_NEW)
+    now = weekly.resetsAtMs - zi.WEEK_MS + 4 * 86400_000  # 1,000 credits over 4 days
+    assert zi.weekly_projection(now, 1000.0, 60000.0, weekly.resetsAtMs) is None
+
+
+def Test_weeklyProjection_when_paceExhaustsFirst() -> None:
+    _, _, weekly = zc.parse_quota(QUOTA_PRO_NEW)
+    now = weekly.resetsAtMs - zi.WEEK_MS + 4 * 3600_000
+    proj = zi.weekly_projection(now, 40000.0, 60000.0, weekly.resetsAtMs)
+    assert proj is not None
+    assert 0 < proj.hoursRemaining < 48
+    assert proj.exhaustsAtMs < weekly.resetsAtMs
+    assert proj.hoursToThreshold is not None and proj.hoursToThreshold < proj.hoursRemaining
+
+
+def Test_weeklyProjection_when_cycleTooYoung() -> None:
+    _, _, weekly = zc.parse_quota(QUOTA_PRO_NEW)
+    now = weekly.resetsAtMs - zi.WEEK_MS + 60_000  # one minute elapsed
+    assert zi.weekly_projection(now, 100.0, 60000.0, weekly.resetsAtMs) is None
+
+
+def Test_predictiveNotification_when_thresholdApproaching(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fired: list[str] = []
+
+    def fake_fire(summary: str, body: str, critical: bool) -> bool:
+        fired.append(summary)
+        return True
+
+    monkeypatch.setattr(zn, "_fire_notification", fake_fire)
+    notify_state = tmp_path / "notify-state.json"
+    record = {
+        "error": "",
+        "weekly": {"present": True, "percent": 70.0, "used": 42000.0, "budget": 60000.0, "resetsAtMs": 1789287746998},
+        "fiveHour": {"present": False},
+        "projection": {"hoursToThreshold": 4.2, "exhaustsAtMs": 1789200000000},
+    }
+    zn.maybe_notify(record, enabled=True, lang="zh", notify_state_path=notify_state)
+    assert len(fired) == 1 and "90%" in fired[0] and "周额度" in fired[0]
+    zn.maybe_notify(record, enabled=True, lang="zh", notify_state_path=notify_state)  # deduped per cycle
+    assert len(fired) == 1
+
+
+def Test_notifyLang_when_configOverridesOrAuto() -> None:
+    assert zn.notify_lang({"language": "zh"}) == "zh"
+    assert zn.notify_lang({"language": "auto"}) in ("en", "zh")
+
+
+# ------------------------------------------------------------------- history
+
+
+def Test_historyUpsert_when_bucket_value_grows(tmp_path: Path) -> None:
+    zh = load_module("zhipu_history", REPO / "bin" / "zhipu_history.py")
+    db = tmp_path / "history.db"
+
+    class Series:
+        hourLabels = ("2026-09-08 15:00", "2026-09-08 16:00")
+        tokensByHour = (1000.0, 500.0)
+        peakByHour = (True, True)
+
+    first = zh.collect_history(db, Series)
+    assert first["daily"] == [{"key": "2026-09-08", "tokens": 1500.0}]
+
+    Series.tokensByHour = (1800.0, 400.0)  # live hour grows, closed hour shrinks in-flight
+    second = zh.collect_history(db, Series)
+    assert second["daily"] == [{"key": "2026-09-08", "tokens": 2300.0}]  # 1800 + max(500,400)
+
+
+def Test_historyAggregates_when_days_span_groups(tmp_path: Path) -> None:
+    zh = load_module("zhipu_history", REPO / "bin" / "zhipu_history.py")
+    db = tmp_path / "history.db"
+
+    class Series:
+        hourLabels = ("2026-09-06 20:00", "2026-09-07 20:00", "2026-09-08 03:00")
+        tokensByHour = (100.0, 200.0, 40.0)
+        peakByHour = (False, False, False)
+
+    result = zh.collect_history(db, Series)
+    assert [p["key"] for p in result["daily"]] == ["2026-09-06", "2026-09-07", "2026-09-08"]
+    assert result["monthly"] == [{"key": "2026-09", "tokens": 340.0}]
+    assert len(result["weekly"]) >= 1
