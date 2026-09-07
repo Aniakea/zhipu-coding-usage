@@ -4,6 +4,8 @@ Zhipu GLM Coding Plan usage as one glyph on the Omarchy bar and one panel
 behind it — the 5-hour window, the weekly quota, and the monthly MCP tool
 budget, for accounts on **open.bigmodel.cn** (default) or **api.z.ai**.
 
+![Zhipu Coding Usage — bar widget and panel](preview.png)
+
 ## What it shows
 
 - **5-hour window** — percent used, credits used / budget, reset countdown
@@ -40,7 +42,7 @@ omarchy bar move io.github.aniakea.zhipu-coding-usage --section center
 ## Requirements
 
 - Omarchy 4.x with `omarchy-shell` (Quickshell).
-- Python 3.9+ (ships with Arch; standard library only — no pip packages).
+- Python 3.10+ (ships with Arch; standard library only — no pip packages).
 - A Zhipu / z.ai Coding Plan API key (see below).
 - `notify-send` (libnotify) for notifications — optional; without it the
   panel works and notifications are skipped.
@@ -56,11 +58,13 @@ Nothing else is read at runtime — no third-party credential stores. Two
 one-time setup commands write the config file (mode 0600):
 
 ```sh
+PLUGIN_BIN=~/.config/omarchy/plugins/io.github.aniakea.zhipu-coding-usage/bin/zhipu-coding-usage
+
 # Set a key directly (omit the value to be prompted silently):
-~/.config/omarchy/plugins/io.github.aniakea.zhipu-coding-usage/bin/zhipu-coding-usage --set-key <KEY>
+$PLUGIN_BIN --set-key <KEY>
 
 # Or migrate the key you already gave OpenCode, once and explicitly:
-…/bin/zhipu-coding-usage --import-key
+$PLUGIN_BIN --import-key
 ```
 
 `--import-key` copies from `~/.local/share/opencode/auth.json` into the
