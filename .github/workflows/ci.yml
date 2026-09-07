@@ -16,7 +16,10 @@ jobs:
       - name: Lint
         run: uvx ruff check bin/ tests/
       - name: Type check
-        run: uvx basedpyright bin/
+        # Pinned: exit-code semantics for warnings have shifted between
+        # basedpyright releases; 1.40.0 matches the verified local run
+        # (errors-only exit with `warnings = false` in pyproject.toml).
+        run: uvx basedpyright==1.40.0 bin/
 
   qml:
     runs-on: ubuntu-latest
@@ -25,7 +28,12 @@ jobs:
       - name: Install qmllint and QML modules
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends qt6-declarative-dev-tools qml6-modules
+          sudo apt-get install -y --no-install-recommends \
+            qt6-declarative-dev-tools \
+            qml6-module-qtquick \
+            qml6-module-qtquick-controls \
+            qml6-module-qtquick-layouts \
+            qml6-module-qtquick-window
       - name: Fetch Omarchy shell sources
         run: git clone --depth 1 https://github.com/omacom/omarchy /tmp/omarchy
       - name: Lint QML
