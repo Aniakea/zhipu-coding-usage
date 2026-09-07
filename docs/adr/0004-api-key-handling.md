@@ -50,3 +50,20 @@ Rules:
 - No key rotation/refresh handling — out of scope v1.
 - Multi-account (both regions simultaneously) deferred; the config schema
   deliberately leaves room (single object now, array later).
+
+## Second amendment (2026-09-08, decoupled from OpenCode)
+
+The runtime opencode fallback is **removed**. Runtime resolution is exactly
+two sources: environment variables, then the plugin's own config file. Two
+explicit one-time commands own key setup instead:
+
+- `--set-key [KEY]` — writes the key (prompted silently when omitted) to the
+  config file, mode 0600;
+- `--import-key` — copies the key from OpenCode's credential store into the
+  config **once**, on explicit user invocation, printing only a masked echo.
+
+Rationale: a silent read of another application's credential store is a fuzzy
+trust boundary for a marketplace-listed plugin, and in practice it made
+OpenCode the de-facto key owner (no env, no config → the plugin only worked
+because OpenCode happened to hold the key). The import keeps migration
+one command long while making the runtime dependency graph empty.

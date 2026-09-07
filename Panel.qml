@@ -117,7 +117,7 @@ Panel {
   }
 
   function errorText(code) {
-    if (code === "no-key") return "no API key — set ZHIPUAI_API_KEY or ~/.config/omarchy/zhipu-coding-usage.json"
+    if (code === "no-key") return "no API key — run bin/zhipu-coding-usage --set-key (or export ZHIPUAI_API_KEY)"
     if (code === "http-401" || code === "http-403") return "API key rejected"
     if (code === "unreachable") return "Zhipu API unreachable"
     if (code === "bad-payload") return "unexpected API response"

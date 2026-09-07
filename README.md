@@ -51,12 +51,24 @@ Tried in this order — first hit wins:
 
 1. `ZHIPUAI_API_KEY`, `ZAI_API_KEY`, or `GLM_API_KEY` in the environment
 2. `"apiKey"` in `~/.config/omarchy/zhipu-coding-usage.json`
-3. OpenCode's own credential store, `~/.local/share/opencode/auth.json`
-   (provider ids like `zhipuai-coding-plan` / `zai-coding-plan`)
 
-If you use opencode with a GLM coding plan, this works with **zero setup**.
-The two regions' keys are **not interchangeable**; the region is inferred
-from the key's source and can be pinned:
+Nothing else is read at runtime — no third-party credential stores. Two
+one-time setup commands write the config file (mode 0600):
+
+```sh
+# Set a key directly (omit the value to be prompted silently):
+~/.config/omarchy/plugins/io.github.aniakea.zhipu-coding-usage/bin/zhipu-coding-usage --set-key <KEY>
+
+# Or migrate the key you already gave OpenCode, once and explicitly:
+…/bin/zhipu-coding-usage --import-key
+```
+
+`--import-key` copies from `~/.local/share/opencode/auth.json` into the
+plugin's own config and never reads it again. Both accept `--region cn|intl`
+to pin the region (default `cn`; keys from the two regions are **not**
+interchangeable).
+
+The full config shape:
 
 ```json
 {

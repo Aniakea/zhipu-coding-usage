@@ -39,6 +39,6 @@ decides usage.
 - **State record** — `~/.local/state/omarchy/zhipu/usage.json`, atomically written; the panel renders it verbatim. On fetch failure the collector **merges**: last good windows are kept, `error` is stamped, header shows "stale".
 - **Notify state** — `~/.local/state/omarchy/zhipu/notify-state.json`; once-per-level-per-cycle dedup keyed by window + threshold + `nextResetTime` (ADR 0006).
 - **Config file** — `~/.config/omarchy/zhipu-coding-usage.json` (`apiKey`, `region`, `notify`, `organization`, `project`).
-- **Key lookup order** — env `ZHIPUAI_API_KEY` → `ZAI_API_KEY` → `GLM_API_KEY` → config file → opencode `auth.json` (ADR 0004, amended).
+- **Key lookup order** — env `ZHIPUAI_API_KEY` → `ZAI_API_KEY` → `GLM_API_KEY` → config file. Nothing else at runtime; `--set-key` / `--import-key` are the one-time setup commands (ADR 0004, second amendment).
 - **Live / stale** — panel indicator: "live" = fresh successful fetch; "stale" = rendering last good record after a failure, with age shown.
 - **tool-usage** — windowed like model-usage (24 h); totals under `totalUsage`: `totalNetworkSearchCount` / `totalWebReadMcpCount` / `totalZreadMcpCount`, with per-tool detail in `toolDetails[].{modelName,totalUsageCount}`.

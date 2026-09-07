@@ -184,18 +184,29 @@ def Test_regionIntl_when_only_zaiEnvKeySet() -> None:
     assert creds is not None and creds.region == "intl"
 
 
-def Test_opencodeAuthFallback_when_envAndConfigMissing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def Test_none_when_noKeyAnywhere(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    assert zf.resolve_credentials({}, {}) is None
+
+
+def Test_opencodeImportIsExplicit_when_runtimeResolution() -> None:
+    # Runtime resolution never consults the opencode store, even when present.
+    creds = zf.resolve_credentials({}, {})
+    assert creds is None
+
+
+def Test_findOpencodeCredentials_when_authStoreExists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     auth_dir = tmp_path / ".local" / "share" / "opencode"
     auth_dir.mkdir(parents=True)
     (auth_dir / "auth.json").write_text(json.dumps({"zai-coding-plan": "rawstring"}))
-    creds = zf.resolve_credentials({}, {})
+    creds = zf.find_opencode_credentials()
     assert creds is not None and creds.key == "rawstring" and creds.region == "intl" and creds.source == "opencode:zai-coding-plan"
 
 
-def Test_none_when_noKeyAnywhere(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def Test_findOpencodeCredentials_when_authStoreAbsent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    assert zf.resolve_credentials({}, {}) is None
+    assert zf.find_opencode_credentials() is None
 
 
 # ------------------------------------------------------------------ record
@@ -256,3 +267,38 @@ def Test_notifyBody_when_budgetKnown() -> None:
     body = entry._notify_body("weekly", 90, {"used": 54000, "budget": 60000})
     assert "90%" in body and "54,000 of 60,000" in body
     assert "exhausted" in entry._notify_body("weekly", 100, {"used": 1, "budget": 2})
+
+
+# ------------------------------------------------------------------ key setup
+
+
+def Test_setKeyWritesConfig_when_invoked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(entry, "state_paths", lambda: (tmp_path / "usage.json", tmp_path / "notify.json", tmp_path / "config.json"))
+    code = entry.main(["--set-key", "sk-test-1234567890", "--region", "intl"])
+    assert code == 0
+    config = json.loads((tmp_path / "config.json").read_text())
+    assert config["apiKey"] == "sk-test-1234567890" and config["region"] == "intl"
+    mode = (tmp_path / "config.json").stat().st_mode & 0o777
+    assert mode == 0o600
+
+
+def Test_importKeyMigratesFromOpencode_when_authStoreExists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.setattr(entry, "state_paths", lambda: (tmp_path / "usage.json", tmp_path / "notify.json", tmp_path / "config.json"))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    auth_dir = tmp_path / ".local" / "share" / "opencode"
+    auth_dir.mkdir(parents=True)
+    (auth_dir / "auth.json").write_text(json.dumps({"zhipuai-coding-plan": {"key": "sk-opencode-abcdef123456"}}))
+    code = entry.main(["--import-key"])
+    assert code == 0
+    config = json.loads((tmp_path / "config.json").read_text())
+    assert config["apiKey"] == "sk-opencode-abcdef123456" and config["region"] == "cn"
+    out = capsys.readouterr().out
+    assert "sk-o…" in out and "sk-opencode-abcdef123456" not in out
+
+
+def Test_importKeyFailsSoftly_when_noAuthStore(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(entry, "state_paths", lambda: (tmp_path / "usage.json", tmp_path / "notify.json", tmp_path / "config.json"))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    assert entry.main(["--import-key"]) == 2

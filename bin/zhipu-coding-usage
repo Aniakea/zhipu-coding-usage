@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # omarchy:summary=Collect Zhipu Coding Plan usage into one JSON record
-# omarchy:args=[--print] [--quiet] [--no-notify]
+# omarchy:args=[--print] [--quiet] [--no-notify] [--set-key [KEY]] [--import-key] [--region cn|intl]
 # omarchy:hidden=true
 """Collect Zhipu Coding Plan usage into a single display-ready JSON record.
 
@@ -9,13 +9,21 @@ plan reports one, and last-24h per-model/tool usage from the Zhipu monitor API
 (``open.bigmodel.cn`` by default, ``api.z.ai`` configurable). The record is
 written atomically to ``$XDG_STATE_HOME/omarchy/zhipu/usage.json``, where the
 bar widget watches it. The API key is used for the requests only — never
-written to the record, the notify state, or any log.
+written to the state record, the notify state, or any log.
+
+Key setup (run once, then the runtime never touches anything but env/config):
+
+  --set-key [KEY]   write KEY (or a silently prompted value) to the config
+  --import-key      copy the key from OpenCode's credential store to the
+                    config — an explicit one-time migration, after which the
+                    plugin has no runtime dependency on OpenCode
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import getpass
 import json
 import os
 import subprocess
@@ -180,6 +188,43 @@ def maybe_notify(record: dict[str, Any], enabled: bool) -> None:
         return  # A repeated notification beats a failed run.
 
 
+# ----------------------------------------------------------------- key setup
+
+
+def mask_key(key: str) -> str:
+    return key[:4] + "…" + key[-4:] if len(key) > 12 else "…"
+
+
+def save_config_key(config_path: Path, key: str, region: str) -> None:
+    config = zf.read_config(config_path)
+    config["apiKey"] = key
+    config["region"] = region
+    write_json(config_path, config)
+
+
+def run_key_setup(args: argparse.Namespace, config_path: Path) -> int:
+    if args.import_key:
+        credentials = zf.find_opencode_credentials()
+        if credentials is None:
+            sys.stderr.write("no Zhipu key found in OpenCode's auth.json\n")
+            return 2
+        key, region, source = credentials.key, credentials.region, credentials.source
+    else:
+        key = args.set_key if args.set_key else getpass.getpass("Zhipu API key: ")
+        if not key.strip():
+            sys.stderr.write("empty key, nothing written\n")
+            return 2
+        key = key.strip()
+        region = args.region or str(zf.read_config(config_path).get("region") or "").strip().lower() or "cn"
+
+    if args.region:
+        region = args.region
+    save_config_key(config_path, key, region)
+    origin = f" (imported from {source})" if args.import_key else ""
+    sys.stdout.write(f"apiKey {mask_key(key)} saved to {config_path}, region {region}{origin}\n")
+    return 0
+
+
 # ---------------------------------------------------------------------- main
 
 
@@ -188,9 +233,18 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--print", dest="to_stdout", action="store_true", help="print the record to stdout")
     parser.add_argument("--quiet", action="store_true", help="suppress the stdout summary")
     parser.add_argument("--no-notify", action="store_true", help="never send a desktop notification")
+    parser.add_argument("--set-key", dest="set_key", nargs="?", const="",
+                        help="save KEY (or prompt for it) to the config file and exit")
+    parser.add_argument("--import-key", action="store_true",
+                        help="copy the key from OpenCode's credential store to the config file and exit")
+    parser.add_argument("--region", choices=("cn", "intl"), help="pin the region written by --set-key/--import-key")
     args = parser.parse_args(argv)
 
     usage_path, _, config_path = state_paths()
+
+    if args.set_key is not None or args.import_key:
+        return run_key_setup(args, config_path)
+
     config = zf.read_config(config_path)
     record = collect_record(config, dict(os.environ))
 

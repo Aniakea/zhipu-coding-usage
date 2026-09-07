@@ -72,12 +72,11 @@ def _auth_entry_key(entry: Any) -> str:
 
 
 def resolve_credentials(config: dict[str, Any], env: dict[str, str]) -> Credentials | None:
-    """ADR-0004 order: environment, then config file, then opencode auth.json.
+    """ADR-0004 order: environment, then the plugin's own config file.
 
-    The opencode fallback mirrors copilot-companion's ``gh auth token`` lookup:
-    Omarchy users running opencode with a Zhipu coding plan already hold the
-    key there, the provider id naming the region. An explicit ``region`` in
-    the config overrides any inferred region.
+    No third-party credential store is read at runtime; opencode users import
+    their key once with ``--import-key``. An explicit ``region`` in the
+    config overrides any inferred region.
     """
     configured_region = str(config.get("region") or "").strip().lower()
 
@@ -92,9 +91,12 @@ def resolve_credentials(config: dict[str, Any], env: dict[str, str]) -> Credenti
     if config_key:
         region = configured_region if configured_region in REGION_BASE_URLS else "cn"
         return Credentials(config_key, region, "config-file")
+    return None
 
-    auth_path = Path.home().joinpath(*OPENCODE_AUTH_RELPATH)
-    auth = read_config(auth_path)
+
+def find_opencode_credentials() -> Credentials | None:
+    """Explicit one-time import source; never consulted at runtime."""
+    auth = read_config(Path.home().joinpath(*OPENCODE_AUTH_RELPATH))
     for providers, region in (
         (OPENCODE_CN_PROVIDERS, "cn"),
         (OPENCODE_INTL_PROVIDERS, "intl"),
@@ -102,8 +104,7 @@ def resolve_credentials(config: dict[str, Any], env: dict[str, str]) -> Credenti
         for provider in providers:
             value = _auth_entry_key(auth.get(provider)).strip()
             if value:
-                resolved = configured_region if configured_region in REGION_BASE_URLS else region
-                return Credentials(value, resolved, "opencode:" + provider)
+                return Credentials(value, region, "opencode:" + provider)
     return None
 
 
