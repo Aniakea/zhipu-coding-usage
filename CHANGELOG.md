@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0 - 2026-09-08
+
+- Stable release. Feature baseline: 5-hour and weekly quota meters with
+  reset countdowns and absolute rollover times, pace projection with a
+  predictive 90 % alert, peak/off-peak badge and share, 24 h / day / week /
+  month token charts over a local SQLite history, per-model 24 h usage,
+  threshold notifications, bilingual panel and notifications, dual-region
+  support, one-time key setup, and tag-gated release automation with
+  packaged archives. No code changes from 0.3.0 beyond the version.
+
 ## 0.3.0 - 2026-09-08
 
 - Token charts: 24 h hourly line with peak-hour marking, plus day/week/month
