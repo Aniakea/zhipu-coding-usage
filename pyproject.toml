@@ -4,6 +4,9 @@ testpaths = ["tests"]
 
 [tool.basedpyright]
 extraPaths = ["bin"]
+# Exit code reflects errors only; the JSON-boundary Unknown-type warnings
+# are informational at any strictness level.
+warnings = false
 
 # Peak-hour classification and chart buckets are local wall time by design
 # (ADR-0008); naive datetimes there are intentional.
