@@ -44,3 +44,11 @@ notifications (ADR 0006).
 - The name `zhipu-coding-usage` (not `glm-usage`) matches Zhipu's official
   "Coding Plan" branding for the primarily-CN audience, while keeping the
   `io.github.*` marketplace convention.
+
+## Amendment (2026-09-08, scope reduction)
+
+The **MCP monthly budget (`TIME_LIMIT`) is removed** from scope by owner
+decision: the parser ignores those rows, the panel no longer renders an MCP
+meter or per-tool line, and the 75/90/100 % notification rule for it is gone
+(ADR 0006). The 24 h web-search / web-read counts from the tool-usage
+endpoint are unrelated to that budget and stay.

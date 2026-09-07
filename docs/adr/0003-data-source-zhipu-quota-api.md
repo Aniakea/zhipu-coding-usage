@@ -81,3 +81,9 @@ Captured live against `open.bigmodel.cn` (pro plan, new protocol):
 - The new (credit-based) protocol reports **no `TIME_LIMIT` row**; the panel
   then names the absence instead of showing a zero meter, and the 24h tool
   counts from tool-usage stay visible.
+
+## Second amendment (2026-09-08)
+
+`TIME_LIMIT` rows are now **ignored** entirely (scope change, ADR-0001
+amendment); `parse_quota` returns only the plan level and the two token
+windows, and legacy `monthlyMcpUsage` is no longer mapped.

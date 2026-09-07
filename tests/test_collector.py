@@ -106,35 +106,31 @@ TOOL_USAGE = {
 
 
 def Test_fiveHourAndWeekly_when_newProtocolHasDiscriminators() -> None:
-    level, five_hour, weekly, mcp = zc.parse_quota(QUOTA_PRO_NEW)
+    level, five_hour, weekly = zc.parse_quota(QUOTA_PRO_NEW)
     assert level == "pro"
     assert five_hour.present and five_hour.budget == 12000 and five_hour.used == 183
     assert five_hour.percent == 1.5  # recomputed precisely, not the floored API int
     assert weekly.present and weekly.percent == 8.8
-    assert not mcp.present
 
 
-def Test_mcpTools_when_v2ProtocolCarriesTimeLimit() -> None:
-    level, five_hour, weekly, mcp = zc.parse_quota(QUOTA_MAX_V2)
+def Test_timeLimitIgnored_when_v2ProtocolCarriesIt() -> None:
+    level, five_hour, weekly = zc.parse_quota(QUOTA_MAX_V2)
     assert level == "max"
     assert five_hour.percent == 63 and weekly.percent == 34  # nextResetTime sort fallback
-    assert mcp.present and mcp.percent == 42
-    assert [(t.name, t.used) for t in mcp.tools] == [("search-prime", 220.0), ("web-reader", 88.0), ("zread", 112.0)]
 
 
 def Test_weeklyAbsent_when_oldPlanHasSingleTokensLimit() -> None:
-    level, five_hour, weekly, mcp = zc.parse_quota(QUOTA_OLD_PLAN)
+    level, five_hour, weekly = zc.parse_quota(QUOTA_OLD_PLAN)
     assert level == "lite"
     assert five_hour.present and five_hour.percent == 55
-    assert not weekly.present and not mcp.present
+    assert not weekly.present
 
 
 def Test_legacyFields_when_limitsEntirelyAbsent() -> None:
-    level, five_hour, weekly, mcp = zc.parse_quota(QUOTA_LEGACY)
+    level, five_hour, weekly = zc.parse_quota(QUOTA_LEGACY)
     assert level == "standard"
     assert five_hour.present and five_hour.percent == 42
     assert weekly.present and weekly.percent == 10
-    assert mcp.present and mcp.used == 7
 
 
 def Test_noLimitsError_when_limitsPresentButEmpty() -> None:
@@ -213,8 +209,8 @@ def Test_findOpencodeCredentials_when_authStoreAbsent(tmp_path: Path, monkeypatc
 
 
 def Test_staleRecordKeepsWindows_when_fetchFailsAfterSuccess() -> None:
-    _, five_hour, weekly, mcp = zc.parse_quota(QUOTA_PRO_NEW)
-    good = zc.build_record("cn", "pro", five_hour, weekly, mcp, zc.blank_usage(), "2026-09-08T00:00:00Z").to_dict()
+    _, five_hour, weekly = zc.parse_quota(QUOTA_PRO_NEW)
+    good = zc.build_record("cn", "pro", five_hour, weekly, zc.blank_usage(), "2026-09-08T00:00:00Z").to_dict()
     stale = zc.stale_record(good, "unreachable", "cn")
     assert stale["error"] == "unreachable"
     assert stale["fiveHour"]["percent"] == 1.5
@@ -227,10 +223,10 @@ def Test_blankRecord_when_firstRunFails() -> None:
 
 
 def Test_planLabels_when_levelKnownAndUnknown() -> None:
-    _, five_hour, weekly, mcp = zc.parse_quota(QUOTA_PRO_NEW)
-    record = zc.build_record("cn", "pro", five_hour, weekly, mcp, zc.blank_usage(), "")
+    _, five_hour, weekly = zc.parse_quota(QUOTA_PRO_NEW)
+    record = zc.build_record("cn", "pro", five_hour, weekly, zc.blank_usage(), "")
     assert record.planLabel == "Pro"
-    exotic = zc.build_record("cn", "ultra", five_hour, weekly, mcp, zc.blank_usage(), "")
+    exotic = zc.build_record("cn", "ultra", five_hour, weekly, zc.blank_usage(), "")
     assert exotic.planLabel == "Ultra"
 
 
@@ -247,8 +243,8 @@ def Test_notifyFiresHighestNewThreshold_when_crossed(tmp_path: Path, monkeypatch
     monkeypatch.setattr(entry, "_fire_notification", fake_fire)
     monkeypatch.setattr(entry, "state_paths", lambda: (tmp_path / "usage.json", tmp_path / "notify-state.json", tmp_path / "config.json"))
 
-    _, five_hour, weekly, mcp = zc.parse_quota(QUOTA_MAX_V2)
-    record = zc.build_record("cn", "max", five_hour, weekly, mcp, zc.blank_usage(), "").to_dict()
+    _, five_hour, weekly = zc.parse_quota(QUOTA_MAX_V2)
+    record = zc.build_record("cn", "max", five_hour, weekly, zc.blank_usage(), "").to_dict()
     entry.maybe_notify(record, enabled=True)
 
     assert fired_calls == []  # 63% crosses nothing on any window

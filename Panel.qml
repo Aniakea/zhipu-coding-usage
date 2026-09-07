@@ -47,7 +47,6 @@ Panel {
 
   readonly property var fiveHour: record && record.fiveHour ? record.fiveHour : null
   readonly property var weekly: record && record.weekly ? record.weekly : null
-  readonly property var monthlyMcp: record && record.monthlyMcp ? record.monthlyMcp : null
   readonly property var usage24h: record && record.usage24h ? record.usage24h : null
   readonly property var models: usage24h && usage24h.models ? usage24h.models : []
   readonly property string planLabel: record && record.planLabel ? String(record.planLabel) : ""
@@ -363,26 +362,12 @@ Panel {
             window: root.weekly
           }
 
-          QuotaMeter {
-            width: parent.width
-            label: "MCP monthly"
-            window: root.monthlyMcp
-            toolLine: root.monthlyMcp && root.monthlyMcp.tools && root.monthlyMcp.tools.length > 0
-              ? root.monthlyMcp.tools.map(function(t) { return t.name + " " + M.group(t.used) }).join(" · ")
-              : ""
-          }
-
           // An absent window is a state of the plan, not a zero: naming it
           // beats a silently missing row.
           Text {
             width: parent.width
-            visible: (root.weekly && !root.weekly.present) || (root.monthlyMcp && !root.monthlyMcp.present)
-            text: {
-              var missing = []
-              if (root.weekly && !root.weekly.present) missing.push("weekly quota")
-              if (root.monthlyMcp && !root.monthlyMcp.present) missing.push("MCP monthly budget")
-              return "Not reported on this plan: " + missing.join(", ")
-            }
+            visible: root.weekly && !root.weekly.present
+            text: "Not reported on this plan: weekly quota"
             color: root.faint
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -567,7 +552,6 @@ Panel {
   component QuotaMeter: Column {
     property string label: ""
     property var window: null
-    property string toolLine: ""
     readonly property bool live: window && window.present === true
 
     width: parent.width
@@ -648,16 +632,6 @@ Panel {
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }
-    }
-
-    Text {
-      width: parent.width
-      visible: toolLine !== ""
-      text: toolLine
-      color: root.faint
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.caption
-      elide: Text.ElideRight
     }
   }
 }

@@ -4,8 +4,8 @@
 # omarchy:hidden=true
 """Collect Zhipu Coding Plan usage into a single display-ready JSON record.
 
-Fetches the 5-hour and weekly quota windows, the monthly MCP budget when the
-plan reports one, and last-24h per-model/tool usage from the Zhipu monitor API
+Fetches the 5-hour and weekly quota windows and last-24h per-model/tool
+usage from the Zhipu monitor API
 (``open.bigmodel.cn`` by default, ``api.z.ai`` configurable). The record is
 written atomically to ``$XDG_STATE_HOME/omarchy/zhipu/usage.json``, where the
 bar widget watches it. The API key is used for the requests only — never
@@ -39,12 +39,10 @@ import zhipu_fetch as zf  # noqa: E402
 NOTIFY_RULES: Final[dict[str, tuple[int, ...]]] = {
     "fiveHour": (90,),
     "weekly": (75, 90, 100),
-    "monthlyMcp": (75, 90, 100),
 }
 NOTIFY_WINDOW_LABELS: Final[dict[str, str]] = {
     "fiveHour": "5-hour window",
     "weekly": "weekly quota",
-    "monthlyMcp": "MCP monthly budget",
 }
 NOTIFY_STATE_MAX_AGE_DAYS: Final = 60
 
@@ -94,7 +92,7 @@ def collect_record(config: dict[str, Any], env: dict[str, str]) -> dict[str, Any
     base = zf.REGION_BASE_URLS[credentials.region]
     try:
         quota_payload = zf.fetch_json(base, zf.QUOTA_PATH, credentials, config)
-        level, five_hour, weekly, mcp = zc.parse_quota(quota_payload)
+        level, five_hour, weekly = zc.parse_quota(quota_payload)
     except zf.FetchError as exc:
         return zc.stale_record(load_previous(usage_path), exc.code, credentials.region)
 
@@ -107,7 +105,7 @@ def collect_record(config: dict[str, Any], env: dict[str, str]) -> dict[str, Any
     except zf.FetchError:
         pass  # Secondary endpoints: the quota windows stay authoritative.
 
-    record = zc.build_record(credentials.region, level, five_hour, weekly, mcp, usage, zc.utcnow_iso())
+    record = zc.build_record(credentials.region, level, five_hour, weekly, usage, zc.utcnow_iso())
     return record.to_dict()
 
 

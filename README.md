@@ -1,8 +1,8 @@
 # Zhipu Coding Usage
 
 Zhipu GLM Coding Plan usage as one glyph on the Omarchy bar and one panel
-behind it — the 5-hour window, the weekly quota, and the monthly MCP tool
-budget, for accounts on **open.bigmodel.cn** (default) or **api.z.ai**.
+behind it — the 5-hour window and the weekly quota, for accounts on
+**open.bigmodel.cn** (default) or **api.z.ai**.
 
 ![Zhipu Coding Usage — bar widget and panel](preview.png)
 
@@ -12,13 +12,11 @@ budget, for accounts on **open.bigmodel.cn** (default) or **api.z.ai**.
   **and** the absolute wall-clock time the window rolls over.
 - **Weekly quota** — same, for the week. Old plans without a weekly quota get
   a "not reported on this plan" note instead of a fake zero.
-- **MCP monthly** — the `TIME_LIMIT` tool budget with per-tool detail
-  (search-prime · web-reader · zread), when the plan reports one.
 - **Last 24 hours** — requests and tokens totals, per-model token ranking,
   and web search / web read tool counts.
 - **Threshold notifications** — a desktop notification the first time the
-  weekly or MCP-monthly window crosses 75 / 90 / 100 %, and at 90 % for the
-  5-hour window (once per reset cycle each).
+  weekly window crosses 75 / 90 / 100 %, and at 90 % for the 5-hour window
+  (once per reset cycle each).
 - **Staleness honesty** — on network failure the panel keeps the last good
   numbers, says "stale", and shows their age.
 
@@ -143,9 +141,10 @@ omarchy-shell zhipu usage     # prints "Pro: 5h 6% · weekly 9%"
 `bin/zhipu-coding-usage` (Python, stdlib only) fetches the quota windows and
 the 24 h usage series, parses the plan's protocol variant (credit-limit rows
 with `unit`/`number` discriminators, token-limit rows sorted by reset time,
-`TIME_LIMIT` MCP budget, legacy flat fields), and writes one JSON record
-atomically to `~/.local/state/omarchy/zhipu/usage.json`. `Panel.qml` watches
-that file and draws whatever it says — it owns no arithmetic of its own.
+legacy flat fields; `TIME_LIMIT` rows are ignored), and writes one JSON
+record atomically to `~/.local/state/omarchy/zhipu/usage.json`. `Panel.qml`
+watches that file and draws whatever it says — it owns no arithmetic of its
+own.
 
 Run the collector yourself to see what the panel sees:
 

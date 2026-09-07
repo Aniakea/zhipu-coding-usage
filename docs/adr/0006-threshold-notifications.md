@@ -34,3 +34,8 @@ Mechanics:
   than wall-clock bucketing.
 - 100 % notification doubles as "quota exhausted right now" signal for the
   weekly window.
+
+## Amendment (2026-09-08)
+
+The `monthlyMcp` rule row is removed with the MCP monthly feature; monitored
+windows are the 5-hour (90 %) and weekly (75/90/100 %) only.

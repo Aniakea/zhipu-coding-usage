@@ -45,17 +45,6 @@ ABSENT_WINDOW: Final = Window(False, None, None, None, None, None)
 
 
 @dataclass(frozen=True, slots=True)
-class ToolUse:
-    name: str
-    used: float
-
-
-@dataclass(frozen=True, slots=True)
-class MonthlyMcp(Window):
-    tools: tuple[ToolUse, ...] = ()
-
-
-@dataclass(frozen=True, slots=True)
 class ModelRow:
     name: str
     tokens: float
@@ -89,14 +78,12 @@ class Record:
     planLabel: str
     fiveHour: Window
     weekly: Window
-    monthlyMcp: MonthlyMcp
     usage24h: Usage24h
 
     def to_dict(self) -> dict[str, Any]:
         out = asdict(self)
         out["fiveHour"]["resetsAt"] = self.fiveHour.resets_at_iso()
         out["weekly"]["resetsAt"] = self.weekly.resets_at_iso()
-        out["monthlyMcp"]["resetsAt"] = self.monthlyMcp.resets_at_iso()
         return out
 
 
@@ -147,20 +134,6 @@ def _window_from_row(row: dict[str, Any]) -> Window:
     )
 
 
-def _tools_from_details(raw: Any) -> tuple[ToolUse, ...]:
-    if not isinstance(raw, list):
-        return ()
-    tools: list[ToolUse] = []
-    for detail in raw:
-        if not isinstance(detail, dict):
-            continue
-        name = str(detail.get("modelName") or detail.get("name") or detail.get("toolName") or "").strip()
-        used = _number(detail.get("totalUsageCount")) or _number(detail.get("usage")) or 0.0
-        if name:
-            tools.append(ToolUse(name, used))
-    return tuple(tools)
-
-
 def _classify_token_rows(rows: list[dict[str, Any]]) -> tuple[Window, Window]:
     five_hour = ABSENT_WINDOW
     weekly = ABSENT_WINDOW
@@ -184,9 +157,10 @@ def _classify_token_rows(rows: list[dict[str, Any]]) -> tuple[Window, Window]:
     return five_hour, weekly
 
 
-def parse_quota(payload: Any) -> tuple[str, Window, Window, MonthlyMcp]:
+def parse_quota(payload: Any) -> tuple[str, Window, Window]:
     """ADR-0003 rules: structured ``limits`` first, legacy flat fields only
-    when ``limits`` is entirely absent."""
+    when ``limits`` is entirely absent. ``TIME_LIMIT`` rows (the old MCP
+    monthly budget) are ignored — that support was removed by scope change."""
     data = payload.get("data", payload) if isinstance(payload, dict) else {}
     if not isinstance(data, dict):
         raise FetchError("bad-payload")
@@ -196,21 +170,17 @@ def parse_quota(payload: Any) -> tuple[str, Window, Window, MonthlyMcp]:
 
     if isinstance(limits, list):
         token_rows: list[dict[str, Any]] = []
-        mcp = MonthlyMcp(False, None, None, None, None, None, ())
         for row in limits:
             if not isinstance(row, dict):
                 continue
             match row.get("type"):
                 case "TOKENS_LIMIT" | "CREDIT_LIMIT":
                     token_rows.append(row)
-                case "TIME_LIMIT":
-                    mcp = MonthlyMcp(**asdict(_window_from_row(row)), tools=_tools_from_details(row.get("usageDetails")))
                 case _:
                     continue
-        if not token_rows and not mcp.present:
+        if not token_rows:
             raise FetchError("no-limits")
-        five_hour, weekly = _classify_token_rows(token_rows)
-        return level, five_hour, weekly, mcp
+        return level, *_classify_token_rows(token_rows)
 
     if "limits" in data:
         # Present-but-empty (or non-list) must not fall through to legacy.
@@ -218,19 +188,9 @@ def parse_quota(payload: Any) -> tuple[str, Window, Window, MonthlyMcp]:
 
     legacy_five = _number(data.get("fiveHourPercent"))
     legacy_weekly = _number(data.get("weeklyPercent"))
-    mcp_used = _number(data.get("monthlyMcpUsage"))
     five_hour = Window(True, legacy_five, None, None, None, None) if legacy_five is not None else ABSENT_WINDOW
     weekly = Window(True, legacy_weekly, None, None, None, None) if legacy_weekly is not None else ABSENT_WINDOW
-    monthly = MonthlyMcp(
-        True,
-        None if mcp_used is None else round(mcp_used, 1),
-        mcp_used,
-        None,
-        None,
-        None,
-        (),
-    ) if mcp_used is not None else MonthlyMcp(False, None, None, None, None, None, ())
-    return level, five_hour, weekly, monthly
+    return level, five_hour, weekly
 
 
 def parse_model_usage(payload: Any) -> tuple[int, float, tuple[ModelRow, ...]]:
@@ -276,7 +236,6 @@ def build_record(
     level: str,
     five_hour: Window,
     weekly: Window,
-    mcp: MonthlyMcp,
     usage: Usage24h,
     fetched_at: str,
 ) -> Record:
@@ -293,7 +252,6 @@ def build_record(
         planLabel=label or "Coding Plan",
         fiveHour=five_hour,
         weekly=weekly,
-        monthlyMcp=mcp,
         usage24h=usage,
     )
 
@@ -306,7 +264,7 @@ def stale_record(previous: dict[str, Any] | None, error: str, region: str) -> di
         record["error"] = error
         record["region"] = region or str(record.get("region") or "")
         return record
-    blank = build_record(region, "", ABSENT_WINDOW, ABSENT_WINDOW, MonthlyMcp(False, None, None, None, None, None, ()), blank_usage(), "")
+    blank = build_record(region, "", ABSENT_WINDOW, ABSENT_WINDOW, blank_usage(), "")
     out = blank.to_dict()
     out["generatedAt"] = utcnow_iso()
     out["error"] = error
