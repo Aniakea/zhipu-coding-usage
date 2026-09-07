@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.aniakea.zhipu-coding-usage",
   "name": "Zhipu Coding Usage",
-  "version": "0.1.0",
+  "version": "0.1.4",
   "author": "Aniakea",
   "license": "MIT",
-  "description": "Zhipu GLM Coding Plan usage — the 5-hour window, weekly quota, and MCP tool spend in a themed Omarchy bar panel.",
+  "description": "Zhipu GLM Coding Plan usage — the 5-hour and weekly quota windows with reset countdowns, the MCP tool budget, and per-model usage in a themed Omarchy bar panel.",
   "homepage": "https://github.com/Aniakea/zhipu-coding-usage",
   "kinds": [
     "bar-widget"
