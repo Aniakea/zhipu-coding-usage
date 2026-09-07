@@ -1,0 +1,6 @@
+[tool.pytest.ini_options]
+python_functions = ["Test_*"]
+testpaths = ["tests"]
+
+[tool.basedpyright]
+extraPaths = ["bin"]

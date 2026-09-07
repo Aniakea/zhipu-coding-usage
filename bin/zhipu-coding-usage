@@ -1,0 +1,222 @@
+#!/usr/bin/env python3
+# omarchy:summary=Collect Zhipu Coding Plan usage into one JSON record
+# omarchy:args=[--print] [--quiet] [--no-notify]
+# omarchy:hidden=true
+"""Collect Zhipu Coding Plan usage into a single display-ready JSON record.
+
+Fetches the 5-hour and weekly quota windows, the monthly MCP budget when the
+plan reports one, and last-24h per-model/tool usage from the Zhipu monitor API
+(``open.bigmodel.cn`` by default, ``api.z.ai`` configurable). The record is
+written atomically to ``$XDG_STATE_HOME/omarchy/zhipu/usage.json``, where the
+bar widget watches it. The API key is used for the requests only — never
+written to the record, the notify state, or any log.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any, Final
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import zhipu_collector as zc  # noqa: E402
+import zhipu_fetch as zf  # noqa: E402
+
+NOTIFY_RULES: Final[dict[str, tuple[int, ...]]] = {
+    "fiveHour": (90,),
+    "weekly": (75, 90, 100),
+    "monthlyMcp": (75, 90, 100),
+}
+NOTIFY_WINDOW_LABELS: Final[dict[str, str]] = {
+    "fiveHour": "5-hour window",
+    "weekly": "weekly quota",
+    "monthlyMcp": "MCP monthly budget",
+}
+NOTIFY_STATE_MAX_AGE_DAYS: Final = 60
+
+
+def state_paths() -> tuple[Path, Path, Path]:
+    base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
+    directory = Path(base) / "omarchy" / "zhipu"
+    return directory / "usage.json", directory / "notify-state.json", Path(
+        os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    ) / "omarchy" / "zhipu-coding-usage.json"
+
+
+def write_json(path: Path, payload: dict[str, Any]) -> None:
+    """Atomic write so the panel never observes a half-written record."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp: Path | None = None
+    try:
+        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp-", suffix=".json")
+        tmp = Path(tmp_name)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, separators=(",", ":"))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+        tmp = None
+    finally:
+        if tmp is not None:
+            tmp.unlink(missing_ok=True)
+
+
+def load_previous(usage_path: Path) -> dict[str, Any] | None:
+    try:
+        with usage_path.open("r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def collect_record(config: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
+    usage_path, _, _ = state_paths()
+    credentials = zf.resolve_credentials(config, env)
+    if credentials is None:
+        return zc.stale_record(load_previous(usage_path), "no-key", str(config.get("region") or ""))
+
+    base = zf.REGION_BASE_URLS[credentials.region]
+    try:
+        quota_payload = zf.fetch_json(base, zf.QUOTA_PATH, credentials, config)
+        level, five_hour, weekly, mcp = zc.parse_quota(quota_payload)
+    except zf.FetchError as exc:
+        return zc.stale_record(load_previous(usage_path), exc.code, credentials.region)
+
+    usage = zc.blank_usage()
+    try:
+        models_payload = zf.fetch_json(base, zf.MODEL_USAGE_PATH, credentials, config, zf.usage_window_params())
+        tools_payload = zf.fetch_json(base, zf.TOOL_USAGE_PATH, credentials, config, zf.usage_window_params())
+        calls, tokens, models = zc.parse_model_usage(models_payload)
+        usage = zc.Usage24h(calls, tokens, models, zc.parse_tool_usage(tools_payload))
+    except zf.FetchError:
+        pass  # Secondary endpoints: the quota windows stay authoritative.
+
+    record = zc.build_record(credentials.region, level, five_hour, weekly, mcp, usage, zc.utcnow_iso())
+    return record.to_dict()
+
+
+# -------------------------------------------------------------- notification
+
+
+def _notify_body(window_name: str, threshold: int, window: dict[str, Any]) -> str:
+    label = NOTIFY_WINDOW_LABELS[window_name]
+    used = window.get("used")
+    budget = window.get("budget")
+    counts = ""
+    if isinstance(used, (int, float)) and isinstance(budget, (int, float)) and budget > 0:
+        counts = f" — {used:,.0f} of {budget:,.0f} used"
+    if threshold >= 100:
+        return f"{label} is exhausted.{counts}"
+    return f"{label} has reached {threshold}%.{counts}"
+
+
+def _fire_notification(summary: str, body: str, critical: bool) -> bool:
+    try:
+        result = subprocess.run(
+            [
+                "notify-send",
+                "--app-name=Zhipu Coding Usage",
+                f"--urgency={'critical' if critical else 'normal'}",
+                "--icon=dialog-information",
+                summary,
+                body,
+            ],
+            check=False,
+            timeout=5,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0
+
+
+def maybe_notify(record: dict[str, Any], enabled: bool) -> None:
+    if not enabled or record.get("error") != "":
+        return
+    _, notify_path, _ = state_paths()
+    try:
+        with notify_path.open("r", encoding="utf-8") as fh:
+            state = json.load(fh)
+        fired = state.get("fired", {}) if isinstance(state, dict) else {}
+    except (OSError, ValueError):
+        fired = {}
+
+    now = dt.datetime.now(dt.timezone.utc)
+    fresh: dict[str, str] = {}
+    for window_name, thresholds in NOTIFY_RULES.items():
+        window = record.get(window_name)
+        if not isinstance(window, dict) or window.get("present") is not True:
+            continue
+        percent = window.get("percent")
+        if not isinstance(percent, (int, float)):
+            continue
+        crossed = max((t for t in thresholds if percent >= t), default=None)
+        if crossed is None:
+            continue
+        identity = f"{window_name}@{window.get('resetsAtMs') or 'static'}"
+        if identity in fired:
+            continue
+        summary = f"Zhipu {NOTIFY_WINDOW_LABELS[window_name]} at {percent:.0f}%"
+        if _fire_notification(summary, _notify_body(window_name, crossed, window), crossed >= 100):
+            fresh[identity] = now.isoformat()
+
+    if not fresh:
+        return
+    fired.update(fresh)
+    cutoff = (now - dt.timedelta(days=NOTIFY_STATE_MAX_AGE_DAYS)).isoformat()
+    pruned = {key: at for key, at in fired.items() if at >= cutoff}
+    try:
+        write_json(notify_path, {"fired": pruned})
+    except OSError:
+        return  # A repeated notification beats a failed run.
+
+
+# ---------------------------------------------------------------------- main
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(description="Collect Zhipu Coding Plan usage.")
+    parser.add_argument("--print", dest="to_stdout", action="store_true", help="print the record to stdout")
+    parser.add_argument("--quiet", action="store_true", help="suppress the stdout summary")
+    parser.add_argument("--no-notify", action="store_true", help="never send a desktop notification")
+    args = parser.parse_args(argv)
+
+    usage_path, _, config_path = state_paths()
+    config = zf.read_config(config_path)
+    record = collect_record(config, dict(os.environ))
+
+    write_json(usage_path, record)
+    maybe_notify(
+        record,
+        enabled=not args.no_notify and config.get("notify", True) is not False,
+    )
+
+    if args.to_stdout:
+        json.dump(record, sys.stdout, indent=2)
+        sys.stdout.write("\n")
+    elif not args.quiet:
+        if record.get("error"):
+            sys.stderr.write(f"zhipu usage: {record['error']}\n")
+        else:
+            five = record["fiveHour"].get("percent")
+            weekly = record["weekly"].get("percent")
+            five_text = f"{five:.0f}%" if isinstance(five, (int, float)) else "—"
+            weekly_text = f"{weekly:.0f}%" if isinstance(weekly, (int, float)) else "—"
+            sys.stdout.write(f"{record.get('planLabel') or 'Coding Plan'}: 5h {five_text} · weekly {weekly_text}\n")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        sys.exit(130)
