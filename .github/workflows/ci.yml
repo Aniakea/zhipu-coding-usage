@@ -42,11 +42,13 @@ jobs:
       - name: Fetch Omarchy shell sources
         run: git clone --depth 1 https://github.com/omacom/omarchy /tmp/omarchy
       - name: Lint QML
-        # Real findings are always positioned (file:line:col); import-
-        # resolution banners ("Failed to import Quickshell", missing
-        # builtins) are environment noise — Quickshell has no Ubuntu
-        # package and qs.* needs the Quickshell runtime. Exit code is
-        # unreliable: shell-importing files exit 255 even when clean.
+        # Real findings are always positioned (file:line:col). Everything
+        # filtered below is the cascade of Quickshell being unpackaged on
+        # Ubuntu: its types (and qs.*) resolve to nothing, which qmllint
+        # reports as import failures, a Panel->Panel inheritance cycle, and
+        # unknown anchors/attached scopes on the unresolved bases. The
+        # authoritative run is the packaged-Omarchy local qmllint, which is
+        # clean; this job still catches syntax and naming regressions.
         run: |
           set +e
           /usr/lib/qt6/bin/qmllint \
@@ -56,7 +58,8 @@ jobs:
           set -e
           cat lint.txt
           grep -E "(Panel\.qml|Model\.js):[0-9]+:[0-9]+:" lint.txt \
-            | grep -vi "was not found" > findings.txt || true
+            | grep -viE "was not found|while importing module|inheritance cycle|unknown grouped property scope anchors|unknown attached property scope" \
+            > findings.txt || true
           if grep -Eiq "warning|error" findings.txt; then
             echo "::error::qmllint reported findings"
             exit 1
