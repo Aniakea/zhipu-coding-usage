@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 - 2026-09-08
+
+- Fixed a doubled `%` in threshold notification titles (the value already
+  carried the sign the template adds), and translated the window labels in
+  Chinese notifications (they were English inside zh strings).
+
 ## 1.0.0 - 2026-09-08
 
 - Stable release. Feature baseline: 5-hour and weekly quota meters with

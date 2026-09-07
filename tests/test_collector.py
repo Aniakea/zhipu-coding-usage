@@ -260,6 +260,7 @@ def Test_notifyFiresHighestNewThreshold_when_crossed(tmp_path: Path, monkeypatch
     record["weekly"]["percent"] = 91.0
     zn.maybe_notify(record, enabled=True, lang="en", notify_state_path=notify_state)
     assert len(fired_calls) == 1 and "weekly quota at 91%" in fired_calls[0]
+    assert "%%" not in fired_calls[0]  # pct arrives bare; the template owns the % sign
 
     state = json.loads((tmp_path / "notify-state.json").read_text())
     assert any(key.startswith("weekly@") for key in state["fired"])
@@ -372,6 +373,7 @@ def Test_predictiveNotification_when_thresholdApproaching(
     }
     zn.maybe_notify(record, enabled=True, lang="zh", notify_state_path=notify_state)
     assert len(fired) == 1 and "90%" in fired[0] and "周额度" in fired[0]
+    assert "%%" not in fired[0] and "weekly quota" not in fired[0]  # zh labels, single %
     zn.maybe_notify(record, enabled=True, lang="zh", notify_state_path=notify_state)  # deduped per cycle
     assert len(fired) == 1
 

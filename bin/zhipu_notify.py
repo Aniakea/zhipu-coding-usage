@@ -19,9 +19,9 @@ NOTIFY_RULES: Final[dict[str, tuple[int, ...]]] = {
     "fiveHour": (90,),
     "weekly": (75, 90, 100),
 }
-NOTIFY_WINDOW_LABELS: Final[dict[str, str]] = {
-    "fiveHour": "5-hour window",
-    "weekly": "weekly quota",
+NOTIFY_WINDOW_LABELS: Final[dict[str, dict[str, str]]] = {
+    "fiveHour": {"en": "5-hour window", "zh": "5 小时额度"},
+    "weekly": {"en": "weekly quota", "zh": "每周额度"},
 }
 NOTIFY_STATE_MAX_AGE_DAYS: Final = 60
 PREDICT_HOURS_AHEAD: Final = 6.0
@@ -80,7 +80,7 @@ def _hours_text(hours: float, lang: str) -> str:
 
 
 def _notify_body(window_name: str, threshold: int, window: dict[str, Any], lang: str) -> str:
-    label = NOTIFY_WINDOW_LABELS[window_name]
+    label = NOTIFY_WINDOW_LABELS[window_name][lang]
     used = window.get("used")
     budget = window.get("budget")
     counts = ""
@@ -139,7 +139,10 @@ def maybe_notify(record: dict[str, Any], enabled: bool, lang: str, notify_state_
         identity = f"{window_name}@{window.get('resetsAtMs') or 'static'}"
         if identity in fired:
             continue
-        summary = texts["summary"].format(label=NOTIFY_WINDOW_LABELS[window_name], pct=f"{percent:.0f}%")
+        summary = texts["summary"].format(
+            label=NOTIFY_WINDOW_LABELS[window_name][lang],
+            pct=f"{percent:.0f}",
+        )
         if _fire_notification(summary, _notify_body(window_name, crossed, window, lang), crossed >= 100):
             fresh[identity] = now.isoformat()
 
