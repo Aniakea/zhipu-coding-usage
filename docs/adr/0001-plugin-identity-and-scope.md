@@ -52,3 +52,14 @@ decision: the parser ignores those rows, the panel no longer renders an MCP
 meter or per-tool line, and the 75/90/100 % notification rule for it is gone
 (ADR 0006). The 24 h web-search / web-read counts from the tool-usage
 endpoint are unrelated to that budget and stay.
+
+## Second amendment (2026-09-08, reset-card display dropped)
+
+**Quota reset cards (用量重置卡) are out of scope by owner decision.**
+Investigated: cards are consumable 5-hour/weekly resets with per-card
+expiry, granted via ZCode off-peak rules or events — but their count and
+type are only exposed through the ZCode/account-login channel. Eighteen
+endpoint probes against the key-authenticated namespaces returned 404, the
+`quota/limit` payload carries no card fields, and no community tool reads
+them with an API key. Options (packet capture, manual config, login-flow
+integration) were offered and declined.
