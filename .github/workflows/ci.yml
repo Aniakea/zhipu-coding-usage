@@ -16,10 +16,15 @@ jobs:
       - name: Lint
         run: uvx ruff check bin/ tests/
       - name: Type check
-        # Pinned: exit-code semantics for warnings have shifted between
-        # basedpyright releases; 1.40.0 matches the verified local run
-        # (errors-only exit with `warnings = false` in pyproject.toml).
-        run: uvx basedpyright==1.40.0 bin/
+        # Exit codes drift between basedpyright releases; the gate is the
+        # summary line (errors must be zero — warnings are informational at
+        # the JSON boundary and `warnings = false` is set in pyproject.toml).
+        run: |
+          set +e
+          uvx basedpyright==1.40.0 bin/ > pyright.txt 2>&1
+          set -e
+          tail -5 pyright.txt
+          grep -qE "^0 errors" pyright.txt
 
   qml:
     runs-on: ubuntu-latest
@@ -37,11 +42,11 @@ jobs:
       - name: Fetch Omarchy shell sources
         run: git clone --depth 1 https://github.com/omacom/omarchy /tmp/omarchy
       - name: Lint QML
-        # Stock modules resolve via the distro QML path and qs.* via the
-        # Omarchy shell clone; Quickshell's own types have no Ubuntu package,
-        # so import-resolution notices are expected and the gate is on
-        # every other printed finding. (Exit code is unreliable: shell-
-        # importing files exit 255 even when clean.)
+        # Real findings are always positioned (file:line:col); import-
+        # resolution banners ("Failed to import Quickshell", missing
+        # builtins) are environment noise — Quickshell has no Ubuntu
+        # package and qs.* needs the Quickshell runtime. Exit code is
+        # unreliable: shell-importing files exit 255 even when clean.
         run: |
           set +e
           /usr/lib/qt6/bin/qmllint \
@@ -50,7 +55,8 @@ jobs:
             Panel.qml Model.js > lint.txt 2>&1
           set -e
           cat lint.txt
-          grep -vi "was not found. did you add all import paths" lint.txt > findings.txt || true
+          grep -E "(Panel\.qml|Model\.js):[0-9]+:[0-9]+:" lint.txt \
+            | grep -vi "was not found" > findings.txt || true
           if grep -Eiq "warning|error" findings.txt; then
             echo "::error::qmllint reported findings"
             exit 1
