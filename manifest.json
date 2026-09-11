@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.aniakea.zhipu-coding-usage",
   "name": "Zhipu Coding Usage",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": "Aniakea",
   "license": "MIT",
   "description": "Zhipu GLM Coding Plan usage — quota windows with reset countdowns and pace projection, a 24h token chart, and day/week/month history in a themed Omarchy bar panel.",

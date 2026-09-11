@@ -10,6 +10,7 @@ Buckets are local wall time, matching the peak-hour rules.
 from __future__ import annotations
 
 import datetime as dt
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Final
@@ -33,6 +34,10 @@ def connect(db_path: Path) -> sqlite3.Connection:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.executescript(SCHEMA)
+    try:
+        os.chmod(db_path, 0o600)  # sqlite creates with umask; usage stats stay user-only
+    except OSError:
+        pass
     return conn
 
 

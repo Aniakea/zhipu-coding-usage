@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.0.3 - 2026-09-11
+
+- Fixed threshold notifications so every level (75/90/100 %) fires once per
+  cycle — the dedup identity previously omitted the threshold, letting the
+  75 % alert permanently silence 90 % and 100 % in the same week.
+- Fixed the stale merge: consecutive fetch failures now keep the last good
+  windows on screen (the second failure previously blanked the panel).
+- History failures no longer crash the collector: a corrupt or locked
+  history.db degrades the charts to empty instead of killing the quota
+  display; a refused state write exits cleanly with a plain message.
+- HTTP redirects are refused (fail-closed): urllib would otherwise forward
+  the Authorization header to whatever host a redirect names.
+- `--set-key` is prompt-only — the key can no longer appear in the
+  world-readable process command line.
+- history.db is created mode 0600 (usage statistics stay user-only).
+- Release packaging copies `bin/*` and smoke-imports every module from the
+  assembled package — the v1.0.2 archives shipped without zhipu_secure.py
+  and could not start; this can no longer pass green.
+- ADR drift corrected (0002 entry point/interval, 0004 exit and prompt
+  behavior, 0006 per-threshold identity).
+
 ## 1.0.2 - 2026-09-10
 
 - Fail-closed local IO boundaries (marketplace security review follow-up,

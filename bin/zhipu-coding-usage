@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # omarchy:summary=Collect Zhipu Coding Plan usage into one JSON record
-# omarchy:args=[--print] [--quiet] [--no-notify] [--set-key [KEY]] [--import-key] [--region cn|intl]
+# omarchy:args=[--print] [--quiet] [--no-notify] [--set-key] [--import-key] [--region cn|intl]
 # omarchy:hidden=true
 """Collect Zhipu Coding Plan usage into a single display-ready JSON record.
 
@@ -13,10 +13,12 @@ written to the state record, the notify state, or any log.
 
 Key setup (run once, then the runtime never touches anything but env/config):
 
-  --set-key [KEY]   write KEY (or a silently prompted value) to the config
-  --import-key      copy the key from OpenCode's credential store to the
-                    config — an explicit one-time migration, after which the
-                    plugin has no runtime dependency on OpenCode
+  --set-key        prompt for the key and write it to the config (0600);
+                   prompted rather than argumental so the key never appears
+                   in /proc/PID/cmdline or shell history
+  --import-key     copy the key from OpenCode's credential store to the
+                   config — an explicit one-time migration, after which the
+                   plugin has no runtime dependency on OpenCode
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ import datetime as dt
 import getpass
 import json
 import os
+import sqlite3
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -82,7 +85,11 @@ def collect_record(config: dict[str, Any], env: dict[str, str]) -> dict[str, Any
         float(weekly.budget or 0.0),
         int(weekly.resetsAtMs or 0),
     ) if weekly.present and weekly.used and weekly.budget and weekly.resetsAtMs else None
-    history = zh.collect_history(usage_path.parent / "history.db", usage)
+    history: dict[str, list[dict[str, Any]]] | None = None
+    try:
+        history = zh.collect_history(usage_path.parent / "history.db", usage)
+    except sqlite3.Error:
+        pass  # Charts are auxiliary; a bad history.db must not kill the quotas.
 
     record = zc.build_record(credentials.region, level, five_hour, weekly, usage, zc.utcnow_iso(), peak, projection, history)
     return record.to_dict()
@@ -110,11 +117,11 @@ def run_key_setup(args: argparse.Namespace, config_path: Path) -> int:
             return 2
         key, region, source = credentials.key, credentials.region, credentials.source
     else:
-        key = args.set_key if args.set_key else getpass.getpass("Zhipu API key: ")
-        if not key.strip():
+        # Prompt-only: an argv key would sit in world-readable /proc/PID/cmdline.
+        key = getpass.getpass("Zhipu API key: ").strip()
+        if not key:
             sys.stderr.write("empty key, nothing written\n")
             return 2
-        key = key.strip()
         region = args.region or str(zf.read_config(config_path).get("region") or "").strip().lower() or "cn"
 
     if args.region:
@@ -133,8 +140,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--print", dest="to_stdout", action="store_true", help="print the record to stdout")
     parser.add_argument("--quiet", action="store_true", help="suppress the stdout summary")
     parser.add_argument("--no-notify", action="store_true", help="never send a desktop notification")
-    parser.add_argument("--set-key", dest="set_key", nargs="?", const="",
-                        help="save KEY (or prompt for it) to the config file and exit")
+    parser.add_argument("--set-key", action="store_true",
+                        help="prompt for the key and save it to the config file (mode 0600), then exit")
     parser.add_argument("--import-key", action="store_true",
                         help="copy the key from OpenCode's credential store to the config file and exit")
     parser.add_argument("--region", choices=("cn", "intl"), help="pin the region written by --set-key/--import-key")
@@ -142,13 +149,17 @@ def main(argv: list[str]) -> int:
 
     usage_path, notify_path, config_path = state_paths()
 
-    if args.set_key is not None or args.import_key:
+    if args.set_key or args.import_key:
         return run_key_setup(args, config_path)
 
     config = zf.read_config(config_path)
     record = collect_record(config, dict(os.environ))
 
-    zs.write_json_atomic(usage_path, record)
+    try:
+        zs.write_json_atomic(usage_path, record)
+    except OSError as exc:
+        sys.stderr.write(f"zhipu usage: state write refused ({exc})\n")
+        return 1
     zn.maybe_notify(
         record,
         enabled=not args.no_notify and config.get("notify", True) is not False,

@@ -46,6 +46,17 @@ class FetchError(Exception):
         self.code = code
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    # Monitor APIs never redirect legitimately; following one would forward
+    # the Authorization header to whatever host the redirect names
+    # (urllib rebuilds the request with all headers kept). Fail closed.
+    def redirect_request(self, req: Any, fp: Any, code: Any, msg: Any, headers: Any, newurl: Any) -> None:
+        raise FetchError("redirected")
+
+
+_OPENER: Final = urllib.request.build_opener(_NoRedirectHandler)
+
+
 @dataclass(frozen=True, slots=True)
 class Credentials:
     key: str
@@ -131,7 +142,7 @@ def fetch_json(
 
     for attempt, header in enumerate((credentials.key, "Bearer " + credentials.key)):
         try:
-            with urllib.request.urlopen(request(header), timeout=HTTP_TIMEOUT_S) as response:
+            with _OPENER.open(request(header), timeout=HTTP_TIMEOUT_S) as response:
                 payload = json.loads(response.read(MAX_RESPONSE_BYTES).decode("utf-8"))
         except urllib.error.HTTPError as exc:
             if exc.code == 401 and attempt == 0:

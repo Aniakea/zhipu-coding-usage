@@ -288,8 +288,12 @@ def build_record(
 
 
 def stale_record(previous: dict[str, Any] | None, error: str, region: str) -> dict[str, Any]:
-    """Failure path: keep the last good windows, stamp the error, stay honest."""
-    if isinstance(previous, dict) and previous.get("error") == "":
+    """Failure path: keep the last good windows, stamp the error, stay honest.
+
+    Merges on the presence of windows rather than on the previous error
+    flag, so consecutive failures keep the last good numbers on screen
+    (ADR-0002) instead of blanking on the second one."""
+    if isinstance(previous, dict) and _carries_windows(previous):
         record = dict(previous)
         record["generatedAt"] = utcnow_iso()
         record["error"] = error
@@ -300,3 +304,11 @@ def stale_record(previous: dict[str, Any] | None, error: str, region: str) -> di
     out["generatedAt"] = utcnow_iso()
     out["error"] = error
     return out
+
+
+def _carries_windows(previous: dict[str, Any]) -> bool:
+    for name in ("fiveHour", "weekly"):
+        window = previous.get(name)
+        if isinstance(window, dict) and window.get("present") is True:
+            return True
+    return False

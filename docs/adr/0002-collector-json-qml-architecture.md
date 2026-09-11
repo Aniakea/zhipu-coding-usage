@@ -22,7 +22,7 @@ Three viable architectures for an Omarchy bar-widget that needs network data:
   (`urllib`, `json`, no pip dependencies — matches Arch's stock `python`).
 - State file: `~/.local/state/omarchy/zhipu/usage.json`, written **atomically**
   (temp file + rename) so the panel never sees a partial record.
-- QML side (`BarWidget.qml` + `Panel.qml`) is a **pure renderer**: it owns no
+- QML side (`Panel.qml`, the single `barWidget` entry point) is a **pure renderer**: it owns no
   arithmetic, no HTTP, no parsing — it draws what the record says.
 - Panel triggers a refresh via IPC (`omarchy-shell zhipu refresh`) and on the
   widget's `refreshIntervalSec` timer (default 300 s, configurable through
@@ -41,3 +41,11 @@ Three viable architectures for an Omarchy bar-widget that needs network data:
   README (same as copilot-companion's `~/.local/state/omarchy/copilot/`).
 - Collector is single-account in v1. Multi-account tiles (e.g. both a z.ai and
   a bigmodel.cn key) are future work.
+
+## Amendment (2026-09-11, stale merge)
+
+`stale_record` originally merged the previous record only when its `error`
+flag was empty, which blanked the panel on the *second* consecutive failed
+fetch — against this ADR's keep-the-last-good-numbers contract. Since v1.0.3
+the merge keys on the presence of quota windows, so repeated failures keep
+the last good windows and the staleness marker on screen indefinitely.

@@ -67,8 +67,8 @@ one-time setup commands write the config file (mode 0600):
 ```sh
 PLUGIN_BIN=~/.config/omarchy/plugins/io.github.aniakea.zhipu-coding-usage/bin/zhipu-coding-usage
 
-# Set a key directly (omit the value to be prompted silently):
-$PLUGIN_BIN --set-key <KEY>
+# Set a key (prompted, never echoed — and never in the process list):
+$PLUGIN_BIN --set-key
 
 # Or migrate the key you already gave OpenCode, once and explicitly:
 $PLUGIN_BIN --import-key

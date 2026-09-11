@@ -117,7 +117,9 @@ def maybe_notify(record: dict[str, Any], enabled: bool, lang: str, notify_state_
         crossed = max((t for t in thresholds if percent >= t), default=None)
         if crossed is None:
             continue
-        identity = f"{window_name}@{window.get('resetsAtMs') or 'static'}"
+        # The identity carries the crossed threshold (ADR-0006): every level
+        # fires once per cycle, so 90%/100% still alert after 75% fired.
+        identity = f"{window_name}@{crossed}@{window.get('resetsAtMs') or 'static'}"
         if identity in fired:
             continue
         summary = texts["summary"].format(

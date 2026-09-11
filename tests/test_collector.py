@@ -281,7 +281,8 @@ def Test_notifyBody_when_budgetKnown() -> None:
 
 def Test_setKeyWritesConfig_when_invoked(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(entry, "state_paths", lambda: (tmp_path / "usage.json", tmp_path / "notify.json", tmp_path / "config.json"))
-    code = entry.main(["--set-key", "sk-test-1234567890", "--region", "intl"])
+    monkeypatch.setattr(entry.getpass, "getpass", lambda *a, **k: "sk-test-1234567890")
+    code = entry.main(["--set-key", "--region", "intl"])
     assert code == 0
     config = json.loads((tmp_path / "config.json").read_text())
     assert config["apiKey"] == "sk-test-1234567890" and config["region"] == "intl"
@@ -496,3 +497,78 @@ def Test_notifySendExecutable_ignoresInheritedPath(monkeypatch: pytest.MonkeyPat
         assert zs.notify_send_executable() in (str(fake), "/usr/local/bin/notify-send", None) or fake.is_symlink() is False
     else:
         assert zs.notify_send_executable() is None
+
+
+# ------------------------------------------------------- v1.0.3 regressions
+
+
+def Test_thresholdProgression_when_75FiresThen90() -> None:
+    """ADR-0006: every level fires once per cycle — 90% must not be silenced by 75%."""
+    import tempfile as tf
+
+    fired: list[str] = []
+
+    def fake_fire(summary: str, body: str, critical: bool) -> bool:
+        fired.append(summary)
+        return True
+
+    state = tf.mkdtemp()
+    monkey = pytest.MonkeyPatch()
+    monkey.setattr(zn, "_fire_notification", fake_fire)
+    try:
+        base = {
+            "error": "",
+            "fiveHour": {"present": False},
+            "weekly": {"present": True, "percent": 76.0, "used": 45000.0, "budget": 60000.0, "resetsAtMs": 1789287746998},
+            "projection": None,
+        }
+        zn.maybe_notify(dict(base), True, "en", Path(state) / "n.json")
+        base["weekly"]["percent"] = 91.0
+        zn.maybe_notify(dict(base), True, "en", Path(state) / "n.json")
+        base["weekly"]["percent"] = 100.0
+        zn.maybe_notify(dict(base), True, "en", Path(state) / "n.json")
+    finally:
+        monkey.undo()
+    assert len(fired) == 3  # 75, 90, and 100 all alert within one cycle
+
+
+def Test_staleMergeSurvivesSecondConsecutiveFailure() -> None:
+    """ADR-0002: last good windows stay on screen through repeated failures."""
+    _, five_hour, weekly = zc.parse_quota(QUOTA_PRO_NEW)
+    good = zc.build_record("cn", "pro", five_hour, weekly, zc.blank_usage(), "2026-09-08T00:00:00Z").to_dict()
+    first = zc.stale_record(good, "unreachable", "cn")
+    second = zc.stale_record(first, "unreachable", "cn")
+    third = zc.stale_record(second, "http-401", "cn")
+    for n, record in enumerate((first, second, third), 1):
+        assert record["fiveHour"]["present"] is True and record["weekly"]["present"] is True, f"windows lost at failure #{n}"
+        assert record["error"] != ""
+
+
+def Test_noRedirect_when_apiRedirects() -> None:
+    """Monitor APIs never redirect legitimately; the opener fails closed
+    instead of letting urllib forward the Authorization header cross-host."""
+    import http.server
+    import threading
+
+    class Redirect(http.server.BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(302)
+            self.send_header("Location", "http://example.invalid/x")
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Redirect)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(zf.FetchError, match="redirected"):
+            zf.fetch_json(
+                f"http://127.0.0.1:{server.server_address[1]}",
+                "/api/monitor/usage/quota/limit",
+                zf.Credentials("k", "cn", "test"),
+                {},
+            )
+    finally:
+        server.shutdown()

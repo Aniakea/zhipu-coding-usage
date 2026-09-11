@@ -39,3 +39,11 @@ Mechanics:
 
 The `monthlyMcp` rule row is removed with the MCP monthly feature; monitored
 windows are the 5-hour (90 %) and weekly (75/90/100 %) only.
+
+## Second amendment (2026-09-11, per-threshold identity)
+
+The dedup identity now carries the crossed threshold exactly as the
+mechanics above specify (`window@threshold@nextResetTime`). Before v1.0.3
+the identity omitted the threshold, so within one weekly cycle the 75 %
+notification permanently silenced the 90 % and 100 % alerts; a regression
+test locks the 75→90→100 progression.

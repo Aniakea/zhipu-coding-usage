@@ -35,7 +35,8 @@ Rules:
 - Env wins over the config file (user decision, Round 1).
 - The key is used **only** to build the `Authorization` header for the
   configured region's host. It is never written to the state file, never
-  logged, never passed on a command line that other users could read.
+  logged, and `--set-key` prompts rather than accepting an argument
+  (v1.0.3) so it never appears in the world-readable `/proc/PID/cmdline`.
 - Missing key ⇒ collector exits non-zero with a plain message; panel shows a
   "no API key configured" state instead of zeros.
 - Region defaults to `cn`; README documents that the key and region must match
