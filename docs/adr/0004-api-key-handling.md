@@ -37,8 +37,9 @@ Rules:
   configured region's host. It is never written to the state file, never
   logged, and `--set-key` prompts rather than accepting an argument
   (v1.0.3) so it never appears in the world-readable `/proc/PID/cmdline`.
-- Missing key ⇒ collector exits non-zero with a plain message; panel shows a
-  "no API key configured" state instead of zeros.
+- Missing key ⇒ the collector writes an error record and exits 0; the panel
+  shows the no-key guidance instead of zeros (amended v1.0.3 to match the
+  implementation — the record channel is the panel's error surface).
 - Region defaults to `cn`; README documents that the key and region must match
   (the two regions' keys are not interchangeable).
 

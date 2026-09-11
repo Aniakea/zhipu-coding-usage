@@ -25,8 +25,8 @@ Three viable architectures for an Omarchy bar-widget that needs network data:
 - QML side (`Panel.qml`, the single `barWidget` entry point) is a **pure renderer**: it owns no
   arithmetic, no HTTP, no parsing — it draws what the record says.
 - Panel triggers a refresh via IPC (`omarchy-shell zhipu refresh`) and on the
-  widget's `refreshIntervalSec` timer (default 300 s, configurable through
-  `omarchy bar set`).
+  widget's `refreshIntervalSec` timer (default 120 s since ADR-0005's
+  amendment, configurable through `omarchy bar set`).
 
 ## Consequences
 
