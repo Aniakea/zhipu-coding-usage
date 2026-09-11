@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.2 - 2026-09-10
+
+- Fail-closed local IO boundaries (marketplace security review follow-up,
+  ADR-0010): config/credential/state reads go through O_NOFOLLOW +
+  descriptor type/owner/mode checks + a 1 MiB cap (O_NONBLOCK also closes
+  a FIFO hang); atomic writes hold a verified parent dir_fd for the temp
+  file and rename; notify-send resolves from a root-owned absolute-path
+  allowlist instead of the inherited PATH.
+
 ## 1.0.1 - 2026-09-08
 
 - Fixed a doubled `%` in threshold notification titles (the value already

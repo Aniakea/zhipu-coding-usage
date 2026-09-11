@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any, Final
 from urllib.parse import urlencode
 
+from zhipu_secure import read_json_bounded
+
 REGION_BASE_URLS: Final[dict[str, str]] = {
     "cn": "https://open.bigmodel.cn",
     "intl": "https://api.z.ai",
@@ -52,12 +54,7 @@ class Credentials:
 
 
 def read_config(path: Path) -> dict[str, Any]:
-    try:
-        with path.open("r", encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+    return read_json_bounded(path)
 
 
 def _auth_entry_key(entry: Any) -> str:

@@ -13,4 +13,5 @@ warnings = false
 [tool.ruff.lint.per-file-ignores]
 "bin/zhipu_insights.py" = ["DTZ001", "DTZ007"]
 "bin/zhipu_history.py" = ["DTZ005"]
+"bin/zhipu_secure.py" = ["DTZ005"]
 "tests/test_collector.py" = ["DTZ001"]

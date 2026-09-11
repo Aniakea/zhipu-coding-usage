@@ -37,6 +37,7 @@ import zhipu_fetch as zf  # noqa: E402
 import zhipu_history as zh  # noqa: E402
 import zhipu_insights as zi  # noqa: E402
 import zhipu_notify as zn  # noqa: E402
+import zhipu_secure as zs  # noqa: E402
 
 def state_paths() -> tuple[Path, Path, Path]:
     base = os.environ.get("XDG_STATE_HOME") or str(Path.home() / ".local" / "state")
@@ -47,12 +48,8 @@ def state_paths() -> tuple[Path, Path, Path]:
 
 
 def load_previous(usage_path: Path) -> dict[str, Any] | None:
-    try:
-        with usage_path.open("r", encoding="utf-8") as fh:
-            data = json.load(fh)
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
+    data = zs.read_json_bounded(usage_path)
+    return data if data else None
 
 
 def collect_record(config: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
@@ -102,7 +99,7 @@ def save_config_key(config_path: Path, key: str, region: str) -> None:
     config = zf.read_config(config_path)
     config["apiKey"] = key
     config["region"] = region
-    zn.write_json(config_path, config)
+    zs.write_json_atomic(config_path, config)
 
 
 def run_key_setup(args: argparse.Namespace, config_path: Path) -> int:
@@ -151,7 +148,7 @@ def main(argv: list[str]) -> int:
     config = zf.read_config(config_path)
     record = collect_record(config, dict(os.environ))
 
-    zn.write_json(usage_path, record)
+    zs.write_json_atomic(usage_path, record)
     zn.maybe_notify(
         record,
         enabled=not args.no_notify and config.get("notify", True) is not False,

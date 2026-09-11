@@ -8,12 +8,12 @@ I/O helpers; quota parsing and collection live elsewhere.
 from __future__ import annotations
 
 import datetime as dt
-import json
 import os
 import subprocess
-import tempfile
 from pathlib import Path
 from typing import Any, Final
+
+from zhipu_secure import notify_send_executable, read_json_bounded, write_json_atomic
 
 NOTIFY_RULES: Final[dict[str, tuple[int, ...]]] = {
     "fiveHour": (90,),
@@ -45,25 +45,6 @@ NOTIFY_TEXT: Final[dict[str, dict[str, str]]] = {
 }
 
 
-def write_json(path: Path, payload: dict[str, Any]) -> None:
-    """Atomic write so no reader ever observes a half-written file."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp: Path | None = None
-    try:
-        fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp-", suffix=".json")
-        tmp = Path(tmp_name)
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, separators=(",", ":"))
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
-        tmp = None
-    finally:
-        if tmp is not None:
-            tmp.unlink(missing_ok=True)
-
-
 def notify_lang(config: dict[str, Any]) -> str:
     configured = str(config.get("language") or "").strip().lower()
     if configured in ("en", "zh"):
@@ -93,10 +74,13 @@ def _notify_body(window_name: str, threshold: int, window: dict[str, Any], lang:
 
 
 def _fire_notification(summary: str, body: str, critical: bool) -> bool:
+    executable = notify_send_executable()
+    if executable is None:
+        return False
     try:
         result = subprocess.run(
             [
-                "notify-send",
+                executable,
                 "--app-name=Zhipu Coding Usage",
                 f"--urgency={'critical' if critical else 'normal'}",
                 "--icon=dialog-information",
@@ -116,11 +100,8 @@ def _fire_notification(summary: str, body: str, critical: bool) -> bool:
 def maybe_notify(record: dict[str, Any], enabled: bool, lang: str, notify_state_path: Path) -> None:
     if not enabled or record.get("error") != "":
         return
-    try:
-        with notify_state_path.open("r", encoding="utf-8") as fh:
-            state = json.load(fh)
-        fired = state.get("fired", {}) if isinstance(state, dict) else {}
-    except (OSError, ValueError):
+    fired = read_json_bounded(notify_state_path).get("fired", {})
+    if not isinstance(fired, dict):
         fired = {}
 
     now = dt.datetime.now(dt.timezone.utc)
@@ -168,6 +149,6 @@ def maybe_notify(record: dict[str, Any], enabled: bool, lang: str, notify_state_
     cutoff = (now - dt.timedelta(days=NOTIFY_STATE_MAX_AGE_DAYS)).isoformat()
     pruned = {key: at for key, at in fired.items() if at >= cutoff}
     try:
-        write_json(notify_state_path, {"fired": pruned})
+        write_json_atomic(notify_state_path, {"fired": pruned})
     except OSError:
         return  # A repeated notification beats a failed run.

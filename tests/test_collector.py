@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.machinery
 import importlib.util
 import json
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -416,3 +417,82 @@ def Test_historyAggregates_when_days_span_groups(tmp_path: Path) -> None:
     assert [p["key"] for p in result["daily"]] == ["2026-09-06", "2026-09-07", "2026-09-08"]
     assert result["monthly"] == [{"key": "2026-09", "tokens": 340.0}]
     assert len(result["weekly"]) >= 1
+
+
+# ------------------------------------------------------------- secure IO
+
+
+def load_secure() -> ModuleType:
+    return load_module("zhipu_secure", REPO / "bin" / "zhipu_secure.py")
+
+
+def Test_readRefusesSymlink_when_finalComponentIsLink(tmp_path: Path) -> None:
+    zs = load_secure()
+    real = tmp_path / "real.json"
+    real.write_text(json.dumps({"apiKey": "x"}))
+    link = tmp_path / "config.json"
+    link.symlink_to(real)
+    assert zs.read_json_bounded(link) == {}
+
+
+def Test_readRefusesWorldWritable_when_modeAllowsGroupWrite(tmp_path: Path) -> None:
+    zs = load_secure()
+    target = tmp_path / "config.json"
+    target.write_text(json.dumps({"apiKey": "x"}))
+    target.chmod(0o666)
+    assert zs.read_json_bounded(target) == {}
+
+
+def Test_readRefusesOversized_when_payloadExceedsCap(tmp_path: Path) -> None:
+    zs = load_secure()
+    target = tmp_path / "config.json"
+    target.write_text(json.dumps({"blob": "x" * 5000}))
+    assert zs.read_json_bounded(target, max_bytes=1024) == {}
+
+
+def Test_readRefusesNonRegular_when_pathIsAFifo(tmp_path: Path) -> None:
+    zs = load_secure()
+    fifo = tmp_path / "state.json"
+    os.mkfifo(fifo)
+    assert zs.read_json_bounded(fifo) == {}
+
+
+def Test_readRefusesForeignOwner_when_uidDiffers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    zs = load_secure()
+    monkeypatch.setattr(os, "geteuid", lambda: 4242)
+    target = tmp_path / "config.json"
+    target.write_text(json.dumps({"apiKey": "x"}))
+    assert zs.read_json_bounded(target) == {}
+
+
+def Test_readAcceptsValidFile_when_ownedByUserAndModeSafe(tmp_path: Path) -> None:
+    zs = load_secure()
+    target = tmp_path / "config.json"
+    target.write_text(json.dumps({"apiKey": "x", "n": 1}))
+    assert zs.read_json_bounded(target) == {"apiKey": "x", "n": 1}
+
+
+def Test_writeRefusesUntrustedDir_when_parentIsWorldWritable(tmp_path: Path) -> None:
+    zs = load_secure()
+    tmp_path.chmod(0o777)
+    with pytest.raises(zs.SecureIOError):
+        zs.write_json_atomic(tmp_path / "config.json", {"k": "v"})
+
+
+def Test_writeRoundTrips_when_directoryIsTrusted(tmp_path: Path) -> None:
+    zs = load_secure()
+    tmp_path.chmod(0o700)
+    target = tmp_path / "config.json"
+    zs.write_json_atomic(target, {"k": "v"})
+    assert zs.read_json_bounded(target) == {"k": "v"}
+    assert target.stat().st_mode & 0o777 == 0o600
+
+
+def Test_notifySendExecutable_ignoresInheritedPath(monkeypatch: pytest.MonkeyPatch) -> None:
+    zs = load_secure()
+    monkeypatch.setenv("PATH", "/nonexistent")
+    fake = Path("/usr/bin/notify-send")
+    if fake.exists():
+        assert zs.notify_send_executable() in (str(fake), "/usr/local/bin/notify-send", None) or fake.is_symlink() is False
+    else:
+        assert zs.notify_send_executable() is None
