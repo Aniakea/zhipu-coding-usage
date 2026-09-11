@@ -91,7 +91,8 @@ jobs:
           mkdir -p "${package_dir}/bin" "${package_dir}/docs/adr" "${output_dir}"
           cp Panel.qml Model.js manifest.json preview.png \
             README.md CHANGELOG.md LICENSE "${package_dir}/"
-          cp bin/* "${package_dir}/bin/"
+          rm -rf bin/__pycache__
+          find bin -maxdepth 1 -type f -exec cp -t "${package_dir}/bin/" {} +
           cp docs/glossary.md "${package_dir}/docs/"
           cp docs/adr/*.md "${package_dir}/docs/adr/"
 
